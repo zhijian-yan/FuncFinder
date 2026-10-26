@@ -218,3 +218,8 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# FuncFinder local build/runtime artifacts
+.packaging/
+release-assets/
+.test-*/
