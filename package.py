@@ -42,6 +42,21 @@ import zipfile
 from dataclasses import dataclass
 from pathlib import Path
 
+
+def _configure_utf8_stdio():
+    """Windows runner 的默认终端编码可能无法输出中文日志。"""
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is None:
+            continue
+        try:
+            reconfigure(encoding="utf-8", errors="replace")
+        except (OSError, ValueError):
+            pass
+
+
+_configure_utf8_stdio()
+
 APP_NAME = "FuncFinder"
 APP_SCRIPT = "func_finder.py"
 RG_VERSION = "15.2.0"
