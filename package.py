@@ -31,6 +31,7 @@ import argparse
 import hashlib
 import os
 import platform
+import re
 import shlex
 import shutil
 import subprocess
@@ -251,6 +252,19 @@ def _sha256(path):
     return digest.hexdigest()
 
 
+def _parse_sha256(text):
+    """从校验文件中提取 SHA256。
+
+    Linux 发布资产只包含裸哈希，而 Windows 资产是 CertUtil 的输出：
+        SHA256 hash of ripgrep-...zip:
+        71b2...
+        CertUtil: -hashfile command completed successfully.
+    因此不能简单取 text.split()[0]。
+    """
+    match = re.search(r"\b[0-9a-fA-F]{64}\b", text)
+    return match.group(0).lower() if match else ""
+
+
 def _verify_checksum(archive, checksum_url):
     try:
         request = urllib.request.Request(
@@ -262,9 +276,9 @@ def _verify_checksum(archive, checksum_url):
         log(f"  ! 无法获取校验文件，跳过 SHA256 校验：{exc}")
         return
 
-    expected = text.split()[0].lower() if text.split() else ""
+    expected = _parse_sha256(text)
     if not expected:
-        log("  ! 校验文件为空，跳过 SHA256 校验。")
+        log("  ! 校验文件为空或格式无法识别，跳过 SHA256 校验。")
         return
 
     actual = _sha256(archive)
