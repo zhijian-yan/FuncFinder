@@ -17,7 +17,7 @@ import func_finder  # noqa: E402  (导入需要先设置 sys.path)
 
 class DesktopIntegrationTests(unittest.TestCase):
     def test_version(self):
-        self.assertEqual(func_finder.__version__, "0.1.0")
+        self.assertEqual(func_finder.__version__, "0.2.0")
 
     def test_entry_text_quotes_exec_and_sets_dock_keys(self):
         text = func_finder._desktop_entry_text(["/tmp/My App/FuncFinder"])

@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""通用函数定义与实现查询工具（PySide6 / Qt 6）
+"""通用函数与变量定义查询工具（PySide6 / Qt 6）
 
 功能：
     1. 配置任意代码目录（自动保存，跨平台）；
-    2. 输入函数名，搜索其定义与完整实现；
+    2. 在「函数」模式下输入函数名，搜索其定义与完整实现；
+       在「变量」模式下输入变量名，搜索变量/常量的声明与初始值；
     3. 结果以卡片形式展示签名、来源、行号及完整代码，代码带语法高亮；
     4. 支持单条/全部复制结果，以及浅色/深色主题切换；
     5. 搜索在后台线程执行，可随时停止；结果列表按需渲染，
@@ -30,6 +31,7 @@
     python3 func_finder.py --uninstall-desktop
 """
 
+import ast
 import bisect
 import json
 import os
@@ -37,6 +39,7 @@ import re
 import shutil
 import subprocess
 import sys
+import textwrap
 import threading
 import time
 from collections.abc import Sequence
@@ -93,7 +96,10 @@ except ImportError as exc:  # pragma: no cover - 仅在缺少依赖时触发
     )
 
 APP_NAME = "FuncFinder"
-__version__ = "0.1.0"
+__version__ = "0.2.0"
+SEARCH_MODE_FUNCTION = "function"
+SEARCH_MODE_VARIABLE = "variable"
+SEARCH_MODES = (SEARCH_MODE_FUNCTION, SEARCH_MODE_VARIABLE)
 # GNOME Wayland 用 setDesktopFileName() 的值匹配 .desktop 文件名，因此这里
 # 保持 "func-finder"（不带 .desktop 后缀）。
 DESKTOP_FILE_NAME = "func-finder"
@@ -103,13 +109,13 @@ DESKTOP_ICON_NAME = DESKTOP_FILE_NAME
 # 是 APP_NAME；StartupWMClass 必须与它一致。
 DESKTOP_STARTUP_WM_CLASS = APP_NAME
 
-DESKTOP_COMMENT = "Search function definitions and implementations"
-DESKTOP_COMMENT_ZH = "搜索代码中的函数定义与完整实现"
-DESKTOP_GENERIC_NAME = "Function Finder"
-DESKTOP_GENERIC_NAME_ZH = "函数查找器"
+DESKTOP_COMMENT = "Search function and variable definitions"
+DESKTOP_COMMENT_ZH = "搜索代码中的函数与变量定义"
+DESKTOP_GENERIC_NAME = "Function & Variable Finder"
+DESKTOP_GENERIC_NAME_ZH = "函数与变量查找器"
 DESKTOP_CATEGORIES = "Development;"
-DESKTOP_KEYWORDS = "function;search;code;symbol;grep;ripgrep;"
-DESKTOP_KEYWORDS_ZH = "函数;搜索;代码;符号;"
+DESKTOP_KEYWORDS = "function;variable;constant;search;code;symbol;grep;ripgrep;"
+DESKTOP_KEYWORDS_ZH = "函数;变量;常量;搜索;代码;符号;"
 
 
 def _resource_path(*parts):
@@ -509,9 +515,9 @@ _STRING_COMMENT_RE = QRegularExpression(
 
 TRANSLATIONS = {
     "zh": {
-        "app_title": "函数定义查询",
-        "title": "函数定义查询",
-        "subtitle": "在任意代码目录中搜索函数定义与完整实现",
+        "app_title": "函数与变量定义查询",
+        "title": "函数与变量定义查询",
+        "subtitle": "在任意代码目录中搜索函数、变量与常量的定义",
         "code_dir": "代码目录",
         "path_placeholder": "选择任意代码目录，例如 /home/user/project",
         "browse": "选择目录",
@@ -522,19 +528,28 @@ TRANSLATIONS = {
         "path_not_configured": "尚未配置代码目录，请选择目录后点击“应用”。",
         "path_empty_error": "请先选择代码目录。",
         "path_missing_error": "目录不存在：{path}",
+        "mode_function": "函数",
+        "mode_variable": "变量",
+        "mode_function_tooltip": "搜索函数定义与完整实现",
+        "mode_variable_tooltip": "搜索变量、常量的定义与初始值",
         "function_name": "函数名称",
+        "variable_name": "变量名称",
         "search_placeholder": "例如：i2c_transfer、parse_config、main",
+        "variable_placeholder": "例如：MAX_BUFFER_SIZE、config、timeout",
         "search": "搜索",
         "stop": "停止",
         "hint": (
             "支持 C/C++、Python、Go、Rust、Java、C#、JavaScript/TypeScript、"
             "Kotlin、Scala、Swift、Dart 等，按文件扩展名自动识别"
         ),
+        "variable_hint": (
+            "支持全局/局部变量、常量以及结构体/类字段，覆盖与函数模式相同的语言"
+        ),
         "hint_install_rg": (
             "当前使用 {engine} 引擎；安装 ripgrep（rg）可显著加快搜索。"
         ),
         "status_initial": "请先配置代码目录",
-        "status_ready": "代码目录已就绪，输入函数名开始搜索",
+        "status_ready": "代码目录已就绪，输入名称开始搜索",
         "status_not_configured": "尚未配置代码目录",
         "status_invalid_dir": "代码目录无效",
         "results_title": "搜索结果",
@@ -546,9 +561,17 @@ TRANSLATIONS = {
             "支持 C/C++、Python、Go、Rust、Java、C#、JavaScript/TypeScript、"
             "Kotlin、Swift 等"
         ),
+        "empty_initial_variable": (
+            "配置代码目录，输入变量名开始搜索\n"
+            "支持全局/局部变量、常量，以及结构体/类字段"
+        ),
         "empty_no_results": (
             "未找到函数定义或实现\n"
             "可尝试其他函数名，或确认代码目录和文件扩展名是否受支持"
+        ),
+        "empty_no_results_variable": (
+            "未找到变量定义\n"
+            "可尝试其他变量名，或确认代码目录和文件扩展名是否受支持"
         ),
         "empty_failed": "搜索出错，请检查代码目录是否可读",
         "theme_dark": "深色模式",
@@ -556,34 +579,49 @@ TRANSLATIONS = {
         "theme_tooltip": "切换界面主题",
         "lang_tooltip": "切换语言",
         "error_empty_name": "请输入要查询的函数名。",
+        "error_empty_variable_name": "请输入要查询的变量名。",
         "error_invalid_name": (
             "函数名不合法：只能包含字母、数字、下划线、$，且不能以数字开头。"
+        ),
+        "error_invalid_variable_name": (
+            "变量名不合法：只能包含字母、数字、下划线、$，且不能以数字开头。"
         ),
         "error_no_dir": "请先配置有效的代码目录。",
         "searching": "正在搜索 “{name}” ...（引擎：{engine}）",
         "stopping": "正在停止搜索 “{name}” ...",
+        "kind_function": "函数",
+        "kind_variable": "变量",
         "searching_progress": (
-            "正在搜索 “{name}” ... 已扫描 {scanned} 个候选，找到 {count} 个函数"
+            "正在搜索 “{name}” ... 已扫描 {scanned} 个候选，找到 {count} 个{kind}"
         ),
-        "searching_found": "正在搜索 “{name}” ... 已找到 {count} 个函数",
+        "searching_found": "正在搜索 “{name}” ... 已找到 {count} 个{kind}",
         "finished_summary": (
-            "搜索完成：扫描 {scanned} 个候选，找到 {count} 个函数，耗时 {seconds:.2f} 秒"
+            "搜索完成：扫描 {scanned} 个候选，找到 {count} 个{kind}，耗时 {seconds:.2f} 秒"
         ),
         "stopped_summary": (
-            "搜索已停止：扫描 {scanned} 个候选，找到 {count} 个函数，耗时 {seconds:.2f} 秒"
+            "搜索已停止：扫描 {scanned} 个候选，找到 {count} 个{kind}，耗时 {seconds:.2f} 秒"
         ),
         "search_failed": "搜索出错：{message}",
         "copied_all": "已复制 {count} 个结果的代码到剪贴板",
         "lines_range": "第 {start} - {end} 行",
         "implementation": "完整实现",
+        "variable_definition": "变量定义",
+        "scope_global": "全局变量",
+        "scope_local": "局部变量",
+        "scope_member": "成员变量",
+        "scope_class": "类属性",
+        "scope_instance": "实例属性",
+        "scope_type": "类型成员",
         "copy_tooltip": "复制该函数的完整实现代码",
         "copy_signature_tooltip": "复制函数声明",
+        "copy_variable_tooltip": "复制该变量的定义代码",
+        "copy_variable_signature_tooltip": "复制变量声明",
         "copied": "已复制",
     },
     "en": {
-        "app_title": "Function Finder",
-        "title": "Function Finder",
-        "subtitle": "Search function definitions and full implementations in any code directory",
+        "app_title": "Function & Variable Finder",
+        "title": "Function & Variable Finder",
+        "subtitle": "Search function, variable, and constant definitions in any code directory",
         "code_dir": "Code directory",
         "path_placeholder": "Choose any code directory, e.g. /home/user/project",
         "browse": "Browse...",
@@ -594,33 +632,51 @@ TRANSLATIONS = {
         "path_not_configured": "No code directory configured. Choose one and click Apply.",
         "path_empty_error": "Please choose a code directory first.",
         "path_missing_error": "Directory does not exist: {path}",
+        "mode_function": "Function",
+        "mode_variable": "Variable",
+        "mode_function_tooltip": "Search function definitions and implementations",
+        "mode_variable_tooltip": "Search variable and constant definitions",
         "function_name": "Function name",
+        "variable_name": "Variable name",
         "search_placeholder": "e.g. i2c_transfer, parse_config, main",
+        "variable_placeholder": "e.g. MAX_BUFFER_SIZE, config, timeout",
         "search": "Search",
         "stop": "Stop",
         "hint": (
             "Supports C/C++, Python, Go, Rust, Java, C#, JavaScript/TypeScript, "
             "Kotlin, Scala, Swift, Dart, etc. Detected by file extension."
         ),
+        "variable_hint": (
+            "Supports global/local variables, constants, and struct/class fields "
+            "across the same languages as function search."
+        ),
         "hint_install_rg": (
             "Searching with the {engine} engine. "
             "Install ripgrep (rg) for much faster searches."
         ),
         "status_initial": "Configure a code directory first",
-        "status_ready": "Code directory ready. Enter a function name to search.",
+        "status_ready": "Code directory ready. Enter a name to search.",
         "status_not_configured": "No code directory configured",
         "status_invalid_dir": "Invalid code directory",
         "results_title": "Results",
         "results_count": "{count} results",
         "copy_all": "Copy all",
-        "copy_all_tooltip": "Copy the implementation code of all current results",
+        "copy_all_tooltip": "Copy the code of all current results",
         "empty_initial": (
             "Configure a code directory and enter a function name to start\n"
             "Supports C/C++, Python, Go, Rust, Java, C#, JavaScript/TypeScript, "
             "Kotlin, Swift, etc."
         ),
+        "empty_initial_variable": (
+            "Configure a code directory and enter a variable name to start\n"
+            "Supports global/local variables, constants, and struct/class fields"
+        ),
         "empty_no_results": (
             "No function definition or implementation found\n"
+            "Try another name, or check the code directory and supported file extensions"
+        ),
+        "empty_no_results_variable": (
+            "No variable definition found\n"
             "Try another name, or check the code directory and supported file extensions"
         ),
         "empty_failed": "Search failed. Check that the code directory is readable.",
@@ -629,32 +685,48 @@ TRANSLATIONS = {
         "theme_tooltip": "Switch UI theme",
         "lang_tooltip": "Switch language",
         "error_empty_name": "Please enter a function name.",
+        "error_empty_variable_name": "Please enter a variable name.",
         "error_invalid_name": (
             "Invalid function name: use letters, digits, underscores, or $, "
+            "and do not start with a digit."
+        ),
+        "error_invalid_variable_name": (
+            "Invalid variable name: use letters, digits, underscores, or $, "
             "and do not start with a digit."
         ),
         "error_no_dir": "Configure a valid code directory first.",
         "searching": "Searching for “{name}” ... (engine: {engine})",
         "stopping": "Stopping “{name}” ...",
+        "kind_function": "function",
+        "kind_variable": "variable",
         "searching_progress": (
             "Searching “{name}” ... scanned {scanned} candidates, "
-            "functions found: {count}"
+            "definitions found: {count}"
         ),
-        "searching_found": "Searching “{name}” ... functions found: {count}",
+        "searching_found": "Searching “{name}” ... definitions found: {count}",
         "finished_summary": (
             "Search complete: scanned {scanned} candidates, "
-            "functions found: {count} in {seconds:.2f}s"
+            "definitions found: {count} in {seconds:.2f}s"
         ),
         "stopped_summary": (
             "Search stopped: scanned {scanned} candidates, "
-            "functions found: {count} in {seconds:.2f}s"
+            "definitions found: {count} in {seconds:.2f}s"
         ),
         "search_failed": "Search failed: {message}",
-        "copied_all": "Copied implementation code from {count} results to clipboard",
+        "copied_all": "Copied code from {count} results to clipboard",
         "lines_range": "Lines {start} - {end}",
         "implementation": "Implementation",
+        "variable_definition": "Variable definition",
+        "scope_global": "Global variable",
+        "scope_local": "Local variable",
+        "scope_member": "Member",
+        "scope_class": "Class attribute",
+        "scope_instance": "Instance attribute",
+        "scope_type": "Type member",
         "copy_tooltip": "Copy the function's implementation code",
         "copy_signature_tooltip": "Copy function declaration",
+        "copy_variable_tooltip": "Copy the variable's definition code",
+        "copy_variable_signature_tooltip": "Copy variable declaration",
         "copied": "Copied",
     },
 }
@@ -686,6 +758,10 @@ class SearchResult:
     signature: str
     implementation: str
     language: str
+    # "function" 或 "variable"；默认值保证旧调用方式仍然可用。
+    kind: str = SEARCH_MODE_FUNCTION
+    # 变量所在作用域：global / local / member / class / instance / type。
+    scope: str = ""
 
 
 # ---------------------------------------------------------------------------
@@ -1167,6 +1243,1159 @@ def extract_function(lines, line_idx, name, language):
 
 
 # ---------------------------------------------------------------------------
+# 变量定义解析
+# ---------------------------------------------------------------------------
+
+_TRIPLE_QUOTE_LANGUAGES = {"Python", "Kotlin", "Scala", "Swift", "Dart"}
+_SEMICOLON_REQUIRED_LANGUAGES = {"C/C++", "Objective-C", "Java", "C#"}
+
+# 这些语言的变量声明可以由关键字直接引入，不必写类型。
+_KEYWORD_DECLARATIONS = {
+    "JavaScript": {"const", "let", "var"},
+    "TypeScript": {"const", "let", "var"},
+    "Kotlin": {"val", "var"},
+    "Scala": {"val", "var"},
+    "Swift": {"let", "var"},
+    "Dart": {"var", "final", "const", "late"},
+    "Go": {"var", "const"},
+    "Rust": {"let", "static", "const"},
+}
+
+_ACCESS_MODIFIERS = {
+    "public",
+    "private",
+    "protected",
+    "internal",
+    "fileprivate",
+    "open",
+    "package",
+}
+_JS_FIELD_MODIFIERS = {
+    "public",
+    "private",
+    "protected",
+    "static",
+    "readonly",
+    "declare",
+    "abstract",
+    "override",
+    "accessor",
+    "async",
+}
+
+# 出现在语句开头时基本可以断定不是变量声明。
+_NON_DECLARATION_START = {
+    "if",
+    "elif",
+    "else",
+    "for",
+    "foreach",
+    "while",
+    "switch",
+    "case",
+    "catch",
+    "return",
+    "throw",
+    "new",
+    "delete",
+    "sizeof",
+    "typeof",
+    "alignof",
+    "decltype",
+    "using",
+    "typedef",
+    "namespace",
+    "import",
+    "package",
+    "include",
+    "from",
+    "require",
+    "with",
+    "assert",
+    "raise",
+    "yield",
+    "await",
+    "del",
+    "print",
+    "goto",
+    "do",
+    "try",
+    "finally",
+    "match",
+    "guard",
+    "defer",
+    "lock",
+    "synchronized",
+}
+
+# 这些词单独出现在变量名前时只是修饰符/关键字，不是类型。
+_NON_TYPE_TAIL_WORDS = _NON_DECLARATION_START | _ACCESS_MODIFIERS | {
+    "static",
+    "extern",
+    "const",
+    "volatile",
+    "register",
+    "mutable",
+    "inline",
+    "virtual",
+    "explicit",
+    "friend",
+    "final",
+    "readonly",
+    "abstract",
+    "sealed",
+    "override",
+    "lateinit",
+    "lazy",
+    "let",
+    "var",
+    "val",
+    "class",
+    "struct",
+    "union",
+    "enum",
+    "interface",
+    "trait",
+    "protocol",
+    "extension",
+    "template",
+    "type",
+    "record",
+    "object",
+    "impl",
+    "pub",
+    "function",
+    "func",
+    "fn",
+    "fun",
+    "def",
+    "lambda",
+}
+
+
+def _apostrophe_starts_literal(text, idx, language):
+    """区分 Rust/C++ 的生命周期、数字分隔符与真正的字符字面量。"""
+    if language == "Rust":
+        nxt = text[idx + 1] if idx + 1 < len(text) else ""
+        if not nxt:
+            return False
+        if nxt == "\\":
+            return True
+        if nxt.isalnum() or nxt == "_":
+            return idx + 2 < len(text) and text[idx + 2] == "'"
+        return True
+    if language == "C/C++":
+        previous = text[idx - 1] if idx else ""
+        nxt = text[idx + 1] if idx + 1 < len(text) else ""
+        if (
+            previous in "0123456789abcdefABCDEF"
+            and nxt in "0123456789abcdefABCDEF"
+        ):
+            # C++14 数字分隔符，例如 1'000'000。
+            return False
+    return True
+
+
+def _mask_line(line, language):
+    """把一行中的字符串和注释替换成空格，保留字符位置。"""
+    chars = list(line)
+    length = len(line)
+    python = language == "Python"
+    idx = 0
+    while idx < length:
+        char = line[idx]
+        if python and char == "#":
+            for pos in range(idx, length):
+                chars[pos] = " "
+            break
+        if not python and char == "/" and idx + 1 < length:
+            nxt = line[idx + 1]
+            if nxt == "/":
+                for pos in range(idx, length):
+                    chars[pos] = " "
+                break
+            if nxt == "*":
+                end = line.find("*/", idx + 2)
+                if end < 0:
+                    for pos in range(idx, length):
+                        chars[pos] = " "
+                    break
+                for pos in range(idx, end + 2):
+                    chars[pos] = " "
+                idx = end + 2
+                continue
+        if char in ('"', "'", "`"):
+            if char == "'" and not _apostrophe_starts_literal(
+                line, idx, language
+            ):
+                idx += 1
+                continue
+            if (
+                language in _TRIPLE_QUOTE_LANGUAGES
+                and line.startswith(char * 3, idx)
+            ):
+                end = line.find(char * 3, idx + 3)
+                if end < 0:
+                    for pos in range(idx, length):
+                        chars[pos] = " "
+                    break
+                for pos in range(idx, end + 3):
+                    chars[pos] = " "
+                idx = end + 3
+                continue
+            pos = idx + 1
+            while pos < length:
+                if line[pos] == "\\":
+                    pos += 2
+                    continue
+                if line[pos] == char:
+                    pos += 1
+                    break
+                pos += 1
+            for fill in range(idx, min(pos, length)):
+                chars[fill] = " "
+            idx = pos
+            continue
+        idx += 1
+    return "".join(chars)
+
+
+def _line_needs_continuation(text, newline_idx, language):
+    """判断换行后是否仍属于同一个声明语句。"""
+    idx = newline_idx - 1
+    while idx >= 0 and text[idx] in " \t\r":
+        idx -= 1
+    if idx < 0:
+        return False
+    if text[idx] == "\\":
+        return True
+    tail = text[max(0, newline_idx - 4) : newline_idx].rstrip()
+    operators = ("=", "+", "-", "*", "/", "%", "&", "|", "^", "?", ":", "=>", "->", "<", ">", ".")
+    if tail.endswith(operators):
+        return True
+    # 逗号在 JS/TS 的多声明和 Python 的多目标赋值里可能续行；
+    # 在 Rust/Go/Kotlin 等语言里，行尾逗号通常只是字段/参数的结束。
+    if language in ("JavaScript", "TypeScript", "Python") and tail.endswith(","):
+        return True
+    nxt = newline_idx + 1
+    while nxt < len(text) and text[nxt] in " \t\r":
+        nxt += 1
+    return nxt < len(text) and text[nxt] in ".+-*/%&|^?:([{"
+
+
+def _statement_end(text, language):
+    """返回声明语句结束位置；用于变量定义的多行初始值/列表。"""
+    length = len(text)
+    python = language == "Python"
+    semicolon_required = language in _SEMICOLON_REQUIRED_LANGUAGES
+    state = None  # None / "line" / "block" / "string" / "triple" / "backtick"
+    quote = ""
+    depth = 0
+    line_comment_start = -1
+    idx = 0
+    while idx < length:
+        char = text[idx]
+        nxt = text[idx + 1] if idx + 1 < length else ""
+
+        if state == "block":
+            if char == "*" and nxt == "/":
+                state = None
+                idx += 2
+            else:
+                idx += 1
+            continue
+        if state == "line":
+            if char == "\n":
+                comment_end = line_comment_start if line_comment_start >= 0 else idx
+                state = None
+                line_comment_start = -1
+                if depth == 0 and not semicolon_required:
+                    return comment_end
+                idx += 1
+                continue
+            idx += 1
+            continue
+        if state == "triple":
+            if text.startswith(quote * 3, idx):
+                state = None
+                idx += 3
+            else:
+                idx += 1
+            continue
+        if state == "string":
+            if char == "\\":
+                idx += 2
+                continue
+            if char == quote:
+                state = None
+            idx += 1
+            continue
+        if state == "backtick":
+            if char == "`":
+                state = None
+            idx += 1
+            continue
+
+        if python and char == "#":
+            state = "line"
+            if depth == 0:
+                line_comment_start = idx
+            idx += 1
+            continue
+        if not python and char == "/" and nxt == "/":
+            state = "line"
+            if depth == 0:
+                line_comment_start = idx
+            idx += 2
+            continue
+        if not python and char == "/" and nxt == "*":
+            state = "block"
+            idx += 2
+            continue
+        if char in ('"', "'", "`"):
+            if char == "'" and not _apostrophe_starts_literal(
+                text, idx, language
+            ):
+                idx += 1
+                continue
+            if char == "`" and language in ("Go", "JavaScript", "TypeScript"):
+                state = "backtick"
+                idx += 1
+                continue
+            if language in _TRIPLE_QUOTE_LANGUAGES and text.startswith(
+                char * 3, idx
+            ):
+                state = "triple"
+                quote = char
+                idx += 3
+                continue
+            state = "string"
+            quote = char
+            idx += 1
+            continue
+        if char in "([{":
+            depth += 1
+            idx += 1
+            continue
+        if char in ")]}":
+            if depth > 0:
+                depth -= 1
+            elif char == "}":
+                return idx
+            idx += 1
+            continue
+        if char == ";" and depth == 0:
+            return idx + 1
+        if char == "\n" and depth == 0:
+            if semicolon_required:
+                idx += 1
+                continue
+            if _line_needs_continuation(text, idx, language):
+                idx += 1
+                continue
+            return line_comment_start if line_comment_start >= 0 else idx
+        idx += 1
+
+    # 文件最后一行可能没有换行符；行尾语言在括号平衡时仍然是一条完整语句。
+    if not semicolon_required and depth == 0:
+        if state == "line" and line_comment_start >= 0:
+            return line_comment_start
+        return length
+    return -1
+
+
+def _collect_statement(lines, start_idx, language, start_offset=0):
+    """收集从 start_idx/start_offset 开始的声明语句。"""
+    end_idx = min(len(lines), start_idx + MAX_CONTEXT_LINES)
+    full_text = "".join(lines[start_idx:end_idx])
+    text = full_text[start_offset:]
+    end = _statement_end(text, language)
+    if end < 0 and end_idx < len(lines):
+        full_text = "".join(lines[start_idx:])
+        text = full_text[start_offset:]
+        end = _statement_end(text, language)
+    if end < 0:
+        return None
+    implementation = text[:end].strip()
+    if not implementation:
+        return None
+    start_line = start_idx + full_text[:start_offset].count("\n") + 1
+    end_line = start_line + implementation.count("\n")
+    return implementation, start_line, end_line
+
+
+def _variable_signature(implementation, name):
+    """变量卡片顶部的声明摘要：取首个物理行，必要时补到出现变量名。"""
+    parts = implementation.splitlines()
+    if not parts:
+        return ""
+    signature = parts[0].strip()
+    idx = 1
+    while name not in signature and idx < len(parts) and idx < 4:
+        signature = f"{signature} {parts[idx].strip()}"
+        idx += 1
+    signature = " ".join(signature.split())
+    if len(signature) > 400:
+        signature = signature[:397].rstrip() + "..."
+    return signature
+
+
+def _scope_line_kind(code, language):
+    """粗略判断一行在作用域上属于函数、类型、命名空间还是普通代码块。"""
+    stripped = code.strip()
+    if not stripped:
+        return "block"
+    if stripped.startswith((")", "]", "}")):
+        # Allman 风格的 "{" 行以及 "}) {" / "};" 等收尾行不是作用域声明。
+        return "skip"
+    if re.fullmatch(r"(?:public|private|protected|internal)\s*:", stripped):
+        return "skip"
+    if re.match(r"^@(?:interface|implementation|protocol)\b", stripped):
+        return "class"
+    if re.match(r"^[-+]\s*\(", stripped):
+        return "function"
+    if re.search(r"\b(?:interface|trait|protocol|extension|enum)\b", stripped):
+        return "type"
+    if re.match(
+        r"^(?:export\s+)?(?:declare\s+)?type\s+[A-Za-z_$][\w$]*\s*(?:<[^>]*>)?\s*=",
+        stripped,
+    ):
+        return "type"
+    if re.search(
+        r"\b(?:class|struct|union|object|record)\b", stripped
+    ) or re.search(r"\bimpl\b", stripped):
+        return "class"
+    if re.search(r"\bnamespace\b", stripped):
+        return "namespace"
+    if re.search(r"\b(?:function|func|fn|fun|def)\b", stripped):
+        return "function"
+    if re.match(
+        r"^(?:if|elif|else|for|foreach|while|switch|catch|do|try|finally|"
+        r"when|guard|defer|with|match|loop|repeat|unless|using|lock|"
+        r"synchronized)\b",
+        stripped,
+    ):
+        return "block"
+    if re.search(r"=>\s*\{?\s*$", stripped):
+        return "function"
+    if re.search(r"\)\s*(?:(?:->|:)\s*[^;{=]+)?\s*\{?\s*$", stripped):
+        if not stripped.endswith(";"):
+            return "function"
+    return "block"
+
+
+def _scope_kind(lines, line_idx, language):
+    """根据缩进和上层声明判断变量作用域。
+
+    返回值：global / local / member / type。
+    """
+    if line_idx <= 0:
+        return "global"
+    indent = _indent_width(lines[line_idx])
+    if indent == 0:
+        return "global"
+    target_indent = indent
+    idx = line_idx - 1
+    while idx >= 0:
+        raw = lines[idx]
+        code = _mask_line(raw, language).strip()
+        if not code:
+            idx -= 1
+            continue
+        if code.startswith(("@", "#", "//", "/*", "*")) and not re.match(
+            r"^@(?:interface|implementation|protocol)\b", code
+        ):
+            idx -= 1
+            continue
+        if language != "Python" and _in_block_comment(lines, idx):
+            idx -= 1
+            continue
+        if language == "Python":
+            in_string, _depth = _python_context_before(lines, idx)
+            if in_string:
+                idx -= 1
+                continue
+        if code in ("{", "};", "});") or re.fullmatch(
+            r"[)\]}]+\s*[;,]?", code
+        ):
+            idx -= 1
+            continue
+        current_indent = _indent_width(raw)
+        if current_indent >= target_indent:
+            idx -= 1
+            continue
+        kind = _scope_line_kind(code, language)
+        if kind == "skip":
+            idx -= 1
+            continue
+        if kind in ("function", "class", "type"):
+            return {
+                "function": "local",
+                "class": "member",
+                "type": "type",
+            }[kind]
+        if kind == "namespace":
+            return "global"
+        # 控制语句、访问修饰符等：向上退一层继续找。
+        target_indent = current_indent
+        idx -= 1
+    return "global"
+
+
+def _display_scope(location, language):
+    if location == "type":
+        return "type"
+    if location == "member":
+        return "class" if language == "Python" else "member"
+    if location == "local":
+        return "local"
+    return "global"
+
+
+def _statement_prefix(masked, match_start):
+    """返回同一语句中位于变量名之前的内容及其起始偏移。"""
+    start = 0
+    depth = 0
+    for idx in range(match_start):
+        char = masked[idx]
+        if char in "([{":
+            depth += 1
+        elif char in ")]}":
+            depth = max(0, depth - 1)
+        elif char == ";" and depth == 0:
+            start = idx + 1
+    return masked[start:match_start], start
+
+
+def _has_top_level_equals(text):
+    depth = 0
+    for idx, char in enumerate(text):
+        if char in "([{":
+            depth += 1
+        elif char in ")]}":
+            depth = max(0, depth - 1)
+        elif char == "=" and depth == 0:
+            before = text[idx - 1] if idx else ""
+            after = text[idx + 1] if idx + 1 < len(text) else ""
+            if before in "=!<>" or after in "=>":
+                continue
+            return True
+    return False
+
+
+def _unmatched_opening_depth(text):
+    depth = 0
+    for char in text:
+        if char in "([":
+            depth += 1
+        elif char in ")]":
+            depth = max(0, depth - 1)
+    return depth
+
+
+def _next_significant(text, start):
+    idx = start
+    while idx < len(text) and text[idx] in " \t\r\n":
+        idx += 1
+    return text[idx] if idx < len(text) else ""
+
+
+def _name_matches(masked, name):
+    try:
+        regex = re.compile(_name_regex(name))
+    except re.error:
+        return []
+    return list(regex.finditer(masked))
+
+
+def _keyword_declaration(prefix, language):
+    keywords = _KEYWORD_DECLARATIONS.get(language)
+    if not keywords:
+        return False
+    for match in reversed(list(re.finditer(r"[A-Za-z_$][\w$]*", prefix))):
+        if match.group() not in keywords:
+            continue
+        before = prefix[: match.start()]
+        between = prefix[match.end() :]
+        words = re.findall(r"[A-Za-z_$][\w$]*", before)
+        if any(word in _NON_DECLARATION_START for word in words):
+            continue
+        if "{" in before and any(
+            word in ("class", "struct", "interface", "object")
+            for word in words
+        ):
+            # 同一行 class/struct 大括号内的局部声明不能算作同一层语句。
+            continue
+        if _has_top_level_equals(before) or _has_top_level_equals(between):
+            continue
+        return True
+    return False
+
+
+def _typed_prefix_ok(prefix, language):
+    stripped = prefix.strip()
+    if not stripped:
+        return False
+    if re.match(
+        r"^@(?:property|synthesize|dynamic|interface|implementation|"
+        r"protocol|end|optional|required|public|private|protected|"
+        r"package)\b",
+        stripped,
+    ):
+        return False
+    if _has_top_level_equals(stripped):
+        return False
+    if stripped.endswith((".", "->", "=", "+", "-", "/", "%", "!", "|", "^", "&&", "||", "(", "[", "{")):
+        return False
+    last_char = stripped[-1]
+    if not (last_char.isalnum() or last_char in "_$>]?*&,"):
+        return False
+    last_word = re.search(r"([A-Za-z_$][\w$]*)\s*[,]*\s*$", stripped)
+    if last_word:
+        word = last_word.group(1)
+        if word in _NON_TYPE_TAIL_WORDS and not (
+            word == "var" and language in ("Java", "C#")
+        ):
+            return False
+    first_word = re.match(
+        r"\s*(?:@[A-Za-z_$][\w$.]*(?:\([^)]*\))?\s*)?([A-Za-z_$][\w$]*)",
+        stripped,
+    )
+    if first_word and first_word.group(1) in _NON_DECLARATION_START:
+        return False
+    if not re.search(r"[A-Za-z_$][\w$]*", stripped):
+        return False
+    return True
+
+
+def _qualified_type_prefix(prefix, language):
+    """C++ 静态成员定义 int Foo::name = 0; 中取回类型部分。"""
+    if language not in ("C/C++", "Objective-C"):
+        return None
+    match = re.match(
+        r"^(.*?)((?:[A-Za-z_$][\w$]*\s*::\s*)+)$", prefix, re.S
+    )
+    if not match:
+        return None
+    type_part = match.group(1)
+    return type_part if type_part.strip() else None
+
+
+def _target_after_ok(after, language, keyword=False):
+    if not after:
+        return True
+    if after in "=:;,[])}":
+        return True
+    if after == "{" and language in ("C/C++", "Objective-C"):
+        return True
+    if after in ("*", "&") and not keyword:
+        return True
+    if keyword and language == "Go" and (after.isalnum() or after in "_*["):
+        return True
+    if keyword and language in ("Kotlin", "Scala") and (
+        after.isalnum() or after in "_$"
+    ):
+        return True
+    return False
+
+
+def _extract_name_matches(lines, line_idx, name, language):
+    """通用声明解析：支持带类型的 C 风格语言和关键字声明。"""
+    line = lines[line_idx]
+    masked_line = _mask_line(line, language)
+    matches = _name_matches(masked_line, name)
+    if not matches:
+        return None
+    if language not in ("Python",) and _in_block_comment(lines, line_idx):
+        return None
+
+    for match in matches:
+        start_idx = line_idx
+        lead = masked_line[: match.start()].strip()
+        if not lead:
+            start_idx = _declaration_start(lines, line_idx, language)
+        combined = "".join(lines[start_idx : line_idx + 1])
+        masked_combined = "".join(
+            _mask_line(part, language) for part in lines[start_idx : line_idx + 1]
+        )
+        offset = sum(
+            len(lines[index]) for index in range(start_idx, line_idx)
+        ) + match.start()
+        statement_prefix, prefix_start = _statement_prefix(
+            masked_combined, offset
+        )
+        after_pos = offset + len(match.group(0))
+        after = _next_significant(masked_combined, after_pos)
+        prefix_text = statement_prefix.strip()
+        if not prefix_text or prefix_text.startswith("#"):
+            continue
+
+        keyword = _keyword_declaration(statement_prefix, language)
+
+        # 目标位于上一行遗留的圆括号/方括号中时，通常是函数参数或调用参数；
+        # Kotlin 主构造器里的 val/var 属性是例外，单独放行。
+        outer_depth = _unmatched_opening_depth(masked_combined[:prefix_start])
+        if outer_depth > 0 and not (keyword and language == "Kotlin"):
+            continue
+
+        qualified_prefix = None
+        if keyword:
+            if language in ("JavaScript", "TypeScript"):
+                unclosed_pattern = (
+                    statement_prefix.count("{") > statement_prefix.count("}")
+                    or statement_prefix.count("[")
+                    > statement_prefix.count("]")
+                )
+                if (
+                    after == ":"
+                    and unclosed_pattern
+                ):
+                    # const { key: alias } 中 key 是属性名，不是新变量。
+                    continue
+                if (
+                    unclosed_pattern
+                    and statement_prefix.rstrip().endswith("=")
+                ):
+                    # const { key = name } 中 name 位于默认值表达式里。
+                    continue
+            if not _target_after_ok(after, language, keyword=True):
+                continue
+        else:
+            qualified_prefix = _qualified_type_prefix(
+                statement_prefix, language
+            )
+            type_prefix = qualified_prefix or statement_prefix
+            if _unmatched_opening_depth(type_prefix) > 0:
+                continue
+            if not _typed_prefix_ok(type_prefix, language):
+                continue
+            if not _target_after_ok(after, language, keyword=False):
+                continue
+        if language == "C#" and re.match(r"\s*=>", masked_combined[after_pos:]):
+            # 表达式体属性不是变量定义。
+            continue
+
+        location = _scope_kind(lines, line_idx, language)
+        scope = (
+            "member"
+            if qualified_prefix is not None
+            else _display_scope(location, language)
+        )
+        collected = _collect_statement(
+            lines, start_idx, language, prefix_start
+        )
+        if collected is None:
+            continue
+        implementation, start_line, end_line = collected
+        signature = _variable_signature(implementation, name)
+        return signature, implementation, start_line, end_line, scope
+    return None
+
+
+def _declaration_start(lines, line_idx, language):
+    """变量名位于续行时，向上包含类型/关键字所在行。"""
+    start = line_idx
+    previous = line_idx - 1
+    while previous >= 0 and line_idx - previous <= 3:
+        code = _mask_line(lines[previous], language).strip()
+        if not code:
+            break
+        if code.startswith(("#", "//", "/*", "*", "@")):
+            break
+        if code.endswith((";", "{", "}", "*/", ",")):
+            break
+        if _scope_line_kind(code, language) in ("function", "class", "type"):
+            break
+        start = previous
+        previous -= 1
+    return start
+
+
+def _python_target_matches(node, name):
+    if isinstance(node, ast.Name):
+        return node.id == name
+    if isinstance(node, ast.Starred):
+        return _python_target_matches(node.value, name)
+    if isinstance(node, (ast.Tuple, ast.List)):
+        return any(_python_target_matches(element, name) for element in node.elts)
+    if isinstance(node, ast.Attribute):
+        return (
+            node.attr == name
+            and isinstance(node.value, ast.Name)
+            and node.value.id in ("self", "cls")
+        )
+    return False
+
+
+def _python_target_is_attribute(node, name):
+    if isinstance(node, ast.Attribute):
+        return (
+            node.attr == name
+            and isinstance(node.value, ast.Name)
+            and node.value.id in ("self", "cls")
+        )
+    if isinstance(node, ast.Starred):
+        return _python_target_is_attribute(node.value, name)
+    if isinstance(node, (ast.Tuple, ast.List)):
+        return any(
+            _python_target_is_attribute(element, name) for element in node.elts
+        )
+    return False
+
+
+def _python_definition(tree, name):
+    """返回 (是否定义, 是否为 self/cls 属性)。"""
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign):
+            for target in node.targets:
+                if _python_target_matches(target, name):
+                    return True, _python_target_is_attribute(target, name)
+        elif isinstance(node, ast.AnnAssign):
+            if _python_target_matches(node.target, name):
+                return True, _python_target_is_attribute(node.target, name)
+        elif isinstance(node, ast.NamedExpr):
+            if _python_target_matches(node.target, name):
+                return True, _python_target_is_attribute(node.target, name)
+    return False, False
+
+
+_PYTHON_CONTEXT_CACHE = {}
+_PYTHON_CONTEXT_CACHE_LIMIT = 8
+
+
+def _python_contexts(lines):
+    """一次扫描整份 Python 文件，缓存每行行首的字符串/括号状态。"""
+    key = id(lines)
+    cached = _PYTHON_CONTEXT_CACHE.get(key)
+    if cached is not None and cached[0] is lines and cached[1] == len(lines):
+        return cached[2]
+
+    in_string = []
+    depths = []
+    fence = None
+    depth = 0
+    for line in lines:
+        in_string.append(fence is not None)
+        depths.append(depth)
+        pos = 0
+        while pos < len(line):
+            if fence is not None:
+                end = line.find(fence, pos)
+                if end < 0:
+                    break
+                pos = end + 3
+                fence = None
+                continue
+            char = line[pos]
+            if char == "#":
+                break
+            if char in ('"', "'"):
+                if line.startswith(char * 3, pos):
+                    fence = char * 3
+                    pos += 3
+                    continue
+                pos += 1
+                while pos < len(line):
+                    if line[pos] == "\\":
+                        pos += 2
+                        continue
+                    if line[pos] == char:
+                        pos += 1
+                        break
+                    pos += 1
+                continue
+            if char in "([{":
+                depth += 1
+            elif char in ")]}":
+                depth = max(0, depth - 1)
+            pos += 1
+
+    contexts = list(zip(in_string, depths))
+    if len(_PYTHON_CONTEXT_CACHE) >= _PYTHON_CONTEXT_CACHE_LIMIT:
+        oldest = next(iter(_PYTHON_CONTEXT_CACHE))
+        _PYTHON_CONTEXT_CACHE.pop(oldest, None)
+    _PYTHON_CONTEXT_CACHE[key] = (lines, len(lines), contexts)
+    return contexts
+
+
+def _python_context_before(lines, line_idx):
+    """返回 (是否位于多行字符串内, 行首之前未闭合的括号深度)。"""
+    contexts = _python_contexts(lines)
+    return contexts[line_idx]
+
+
+def _extract_python_variable(lines, line_idx, name, language):
+    in_string, outer_depth = _python_context_before(lines, line_idx)
+    if in_string or outer_depth > 0:
+        # 多行字符串或括号表达式内部不是新的赋值语句。
+        return None
+    masked = _mask_line(lines[line_idx], language)
+    if not _name_matches(masked, name):
+        return None
+    collected = _collect_statement(lines, line_idx, language)
+    if collected is None:
+        return None
+    implementation, start_line, end_line = collected
+    try:
+        tree = ast.parse(textwrap.dedent(implementation), mode="exec")
+    except (SyntaxError, ValueError):
+        return None
+    defined, is_attribute = _python_definition(tree, name)
+    if not defined:
+        return None
+    if is_attribute:
+        scope = "instance"
+    else:
+        scope = _display_scope(
+            _scope_kind(lines, line_idx, language), language
+        )
+    signature = _variable_signature(implementation, name)
+    return signature, implementation, start_line, end_line, scope
+
+
+def _in_go_group_declaration(lines, line_idx):
+    masked = _mask_line(lines[line_idx], "Go")
+    if not masked.strip():
+        return False
+    indent = _indent_width(lines[line_idx])
+    for idx in range(line_idx - 1, max(-1, line_idx - 200), -1):
+        raw = lines[idx]
+        code = _mask_line(raw, "Go").strip()
+        if not code or code.startswith(("//", "/*", "*")):
+            continue
+        if _indent_width(raw) < indent:
+            return bool(re.match(r"^(?:var|const)\s*\(\s*$", code))
+    return False
+
+
+def _go_short_declaration_after(masked, start):
+    depth = 0
+    idx = start
+    while idx < len(masked):
+        char = masked[idx]
+        if char in "([{":
+            depth += 1
+        elif char in ")]}":
+            depth = max(0, depth - 1)
+        elif depth == 0:
+            if masked.startswith(":=", idx):
+                return True
+            if char == ";":
+                return False
+        idx += 1
+    return False
+
+
+def _extract_go_variable(lines, line_idx, name, language):
+    grouped = _in_go_group_declaration(lines, line_idx)
+    if not grouped:
+        found = _extract_name_matches(lines, line_idx, name, language)
+        if found:
+            return found
+
+    masked = _mask_line(lines[line_idx], language)
+    matches = _name_matches(masked, name)
+    if not matches:
+        return None
+    location = _scope_kind(lines, line_idx, language)
+
+    for match in matches:
+        prefix, prefix_start = _statement_prefix(masked, match.start())
+        prefix_text = prefix.strip()
+        after = _next_significant(masked, match.end())
+
+        # Go 的短变量声明：name := value，允许 a, name := ...
+        short_prefix_ok = not prefix_text or re.fullmatch(
+            r"[A-Za-z_]\w*(?:\s*,\s*[A-Za-z_]\w*)*\s*,\s*", prefix_text
+        )
+        if (
+            short_prefix_ok
+            and after != "="
+            and _go_short_declaration_after(masked, match.end())
+            and after in (",", ":")
+        ):
+            collected = _collect_statement(
+                lines, line_idx, language, prefix_start
+            )
+            if collected:
+                implementation, start_line, end_line = collected
+                scope = _display_scope(location, language)
+                return (
+                    _variable_signature(implementation, name),
+                    implementation,
+                    start_line,
+                    end_line,
+                    scope,
+                )
+
+        # 结构体字段：name type / name, other type
+        group_prefix_ok = not prefix_text or re.fullmatch(
+            r"[A-Za-z_]\w*(?:\s*,\s*[A-Za-z_]\w*)*\s*,\s*", prefix_text
+        )
+        if (
+            not grouped
+            and location == "member"
+            and group_prefix_ok
+            and after not in ("(", "=", ".")
+            and (after.isalnum() or after in "_*[")
+        ):
+            collected = _collect_statement(
+                lines, line_idx, language, prefix_start
+            )
+            if collected:
+                implementation, start_line, end_line = collected
+                return (
+                    _variable_signature(implementation, name),
+                    implementation,
+                    start_line,
+                    end_line,
+                    "member",
+                )
+
+        # 分组 var/const 块中的一行：name type = value
+        if (
+            grouped
+            and group_prefix_ok
+            and after not in ("(", ".", ":=")
+        ):
+            collected = _collect_statement(
+                lines, line_idx, language, prefix_start
+            )
+            if collected:
+                implementation, start_line, end_line = collected
+                return (
+                    _variable_signature(implementation, name),
+                    implementation,
+                    start_line,
+                    end_line,
+                    _display_scope(location, language),
+                )
+    return None
+
+
+def _extract_rust_variable(lines, line_idx, name, language):
+    found = _extract_name_matches(lines, line_idx, name, language)
+    if found:
+        return found
+
+    masked = _mask_line(lines[line_idx], language)
+    if _scope_kind(lines, line_idx, language) != "member":
+        return None
+    for match in _name_matches(masked, name):
+        prefix, prefix_start = _statement_prefix(masked, match.start())
+        prefix_text = prefix.strip()
+        if prefix_text and not re.fullmatch(
+            r"(?:pub(?:\s*\([^)]*\))?\s*)*", prefix_text
+        ):
+            continue
+        after = _next_significant(masked, match.end())
+        if after != ":":
+            continue
+        collected = _collect_statement(lines, line_idx, language, prefix_start)
+        if collected:
+            implementation, start_line, end_line = collected
+            return (
+                _variable_signature(implementation, name),
+                implementation,
+                start_line,
+                end_line,
+                "member",
+            )
+    return None
+
+
+def _inline_class_context(masked, position):
+    """检测同一行内 class {...} 中的字段，返回 member/type/None。"""
+    before = masked[:position]
+    last = None
+    for match in re.finditer(r"\b(class|interface|struct)\b", before):
+        last = match
+    if last is None:
+        return None
+    rest = before[last.end() :]
+    brace = rest.find("{")
+    if brace < 0 or "}" in rest[brace:]:
+        return None
+    return "type" if last.group(1) == "interface" else "member"
+
+
+def _extract_js_class_field(lines, line_idx, name, language):
+    if language not in ("JavaScript", "TypeScript"):
+        return None
+    masked = _mask_line(lines[line_idx], language)
+    base_location = _scope_kind(lines, line_idx, language)
+    for match in _name_matches(masked, name):
+        location = base_location
+        if location != "member":
+            location = _inline_class_context(masked, match.start())
+        if location != "member":
+            continue
+        prefix, prefix_start = _statement_prefix(masked, match.start())
+        statement_start = prefix_start
+        field_prefix = prefix
+        if base_location != "member" and "{" in prefix:
+            cut = prefix.rfind("{") + 1
+            field_prefix = prefix[cut:]
+            statement_start = prefix_start + cut
+            previous_semicolon = field_prefix.rfind(";")
+            if previous_semicolon >= 0:
+                field_prefix = field_prefix[previous_semicolon + 1 :]
+                statement_start += previous_semicolon + 1
+        prefix_text = field_prefix.strip()
+        if prefix_text:
+            cleaned = prefix_text.replace("#", "", 1).strip()
+            if cleaned:
+                words = re.findall(r"[A-Za-z_$][\w$]*", cleaned)
+                if any(word not in _JS_FIELD_MODIFIERS for word in words):
+                    continue
+                if re.sub(r"[A-Za-z_$][\w$]*", "", cleaned).strip(" \t#"):
+                    continue
+        after_pos = match.end()
+        after = _next_significant(masked, after_pos)
+        if after in ("?", "!"):
+            after_pos = masked.find(after, after_pos) + 1
+            after = _next_significant(masked, after_pos)
+        if after not in ("", "=", ":", ";"):
+            continue
+        collected = _collect_statement(
+            lines, line_idx, language, statement_start
+        )
+        if collected:
+            implementation, start_line, end_line = collected
+            return (
+                _variable_signature(implementation, name),
+                implementation,
+                start_line,
+                end_line,
+                "member",
+            )
+    return None
+
+
+def extract_variable(lines, line_idx, name, language):
+    """提取变量/常量定义。
+
+    返回 (signature, implementation, start_line, end_line, scope)；
+    scope 为 global / local / member / class / instance / type。
+    """
+    if language == "Python":
+        return _extract_python_variable(lines, line_idx, name, language)
+    if language == "Go":
+        return _extract_go_variable(lines, line_idx, name, language)
+    if language == "Rust":
+        return _extract_rust_variable(lines, line_idx, name, language)
+    if language in ("JavaScript", "TypeScript"):
+        found = _extract_name_matches(lines, line_idx, name, language)
+        if found:
+            return found
+        found = _extract_js_class_field(lines, line_idx, name, language)
+        if found:
+            return found
+        return None
+    return _extract_name_matches(lines, line_idx, name, language)
+
+
+# ---------------------------------------------------------------------------
 # 搜索实现
 # ---------------------------------------------------------------------------
 
@@ -1210,6 +2439,27 @@ def _build_pattern(name):
     )
 
 
+def _build_variable_pattern(name):
+    """构造变量定义候选行的匹配表达式。
+
+    这个表达式只负责召回候选行，最终是否为定义由 extract_variable()
+    按语言和上下文确认。
+    """
+    word = _name_regex(name)
+    return (
+        word
+        + r"\s*[!?]?\s*(?:=|:=|;|,|\[|:)"
+        + r"|(?:^|[;{])\s*(?:[\w:<>\[\],.*&?]+\s+)+[*&]*"
+        + word
+        + r"|\b(?:const|let|var|val|static|final|readonly|lateinit|lazy|"
+        + r"auto|extern|mutable|public|private|protected|internal)\b[^\n;]*"
+        + word
+        + r"|(?:^|[;{])\s*"
+        + word
+        + r"(?:[!?]?\s*[:=]|\s+[A-Za-z_*\[])"
+    )
+
+
 _BACKEND_LABELS = {"rg": "ripgrep", "grep": "grep", "python": "Python"}
 
 
@@ -1244,6 +2494,14 @@ def _grep_pattern(name):
     )
 
 
+def _grep_variable_pattern(name):
+    """grep 后端使用较宽的变量候选匹配，交给提取阶段精确判断。"""
+    escaped = _escape_name(name)
+    start = r"(^|[^[:alnum:]_])"
+    end = r"([^[:alnum:]_]|$)"
+    return start + escaped + end
+
+
 class SearchEngine:
     """与界面解耦的搜索实现，便于单独测试。"""
 
@@ -1262,9 +2520,14 @@ class SearchEngine:
             except OSError:
                 pass
 
-    def search(self, root, name):
+    def search(self, root, name, mode=SEARCH_MODE_FUNCTION):
+        mode = (
+            SEARCH_MODE_VARIABLE
+            if mode == SEARCH_MODE_VARIABLE
+            else SEARCH_MODE_FUNCTION
+        )
         cache = _FileCache()
-        for path, lineno, _line in self._iter_candidates(root, name):
+        for path, lineno, _line in self._iter_candidates(root, name, mode):
             if self.stop_event.is_set():
                 return
             self.scanned += 1
@@ -1279,6 +2542,24 @@ class SearchEngine:
             index = lineno - 1
             if index < 0 or index >= len(lines):
                 continue
+
+            if mode == SEARCH_MODE_VARIABLE:
+                found = extract_variable(lines, index, name, language)
+                if found:
+                    signature, implementation, start_line, end_line, scope = found
+                    yield SearchResult(
+                        name=name,
+                        path=path,
+                        start_line=start_line,
+                        end_line=end_line,
+                        signature=signature,
+                        implementation=implementation,
+                        language=language,
+                        kind=SEARCH_MODE_VARIABLE,
+                        scope=scope,
+                    )
+                continue
+
             found = extract_function(lines, index, name, language)
             if found:
                 signature, implementation, start_line, end_line = found
@@ -1290,24 +2571,35 @@ class SearchEngine:
                     signature=signature,
                     implementation=implementation,
                     language=language,
+                    kind=SEARCH_MODE_FUNCTION,
                 )
 
     @staticmethod
     def backend_name():
         return _BACKEND_LABELS[_choose_backend()]
 
-    def _iter_candidates(self, target, name):
+    def _iter_candidates(self, target, name, mode=SEARCH_MODE_FUNCTION):
         backend = _choose_backend()
+        if mode == SEARCH_MODE_VARIABLE:
+            if backend == "rg":
+                pattern = _build_variable_pattern(name)
+            elif backend == "grep":
+                pattern = None
+            else:
+                pattern = _build_variable_pattern(name)
+        else:
+            pattern = _build_pattern(name)
+
         if backend == "rg":
             yield from self._iter_with_rg(
-                shutil.which("rg"), target, _build_pattern(name)
+                shutil.which("rg"), target, pattern
             )
         elif backend == "grep":
             yield from self._iter_with_grep(
-                shutil.which("grep"), target, name
+                shutil.which("grep"), target, name, mode
             )
         else:
-            yield from self._iter_with_python(target, _build_pattern(name))
+            yield from self._iter_with_python(target, pattern)
 
     def _iter_with_rg(self, rg, target, pattern):
         globs = "*.{" + ",".join(
@@ -1362,13 +2654,20 @@ class SearchEngine:
             proc.wait()
             self.proc = None
 
-    def _iter_with_grep(self, grep, target, name):
+    def _iter_with_grep(
+        self, grep, target, name, mode=SEARCH_MODE_FUNCTION
+    ):
         cmd = [grep, "-r", "-n", "-I", "-E"]
         for suffix in sorted(LANGUAGE_BY_SUFFIX):
             cmd += ["--include", "*" + suffix]
         for excluded in EXCLUDE_DIRS:
             cmd += ["--exclude-dir", excluded]
-        cmd += ["-e", _grep_pattern(name), "--", target]
+        pattern = (
+            _grep_variable_pattern(name)
+            if mode == SEARCH_MODE_VARIABLE
+            else _grep_pattern(name)
+        )
+        cmd += ["-e", pattern, "--", target]
 
         try:
             proc = subprocess.Popen(
@@ -1381,7 +2680,12 @@ class SearchEngine:
                 bufsize=1,
             )
         except OSError:
-            yield from self._iter_with_python(target, _build_pattern(name))
+            fallback = (
+                _build_variable_pattern(name)
+                if mode == SEARCH_MODE_VARIABLE
+                else _build_pattern(name)
+            )
+            yield from self._iter_with_python(target, fallback)
             return
 
         self.proc = proc
@@ -1601,6 +2905,14 @@ QLabel#badge {
     font-size: 11px;
     font-weight: bold;
 }
+QLabel#scopeBadge {
+    background-color: #ecfdf5;
+    color: #047857;
+    border-radius: 6px;
+    padding: 2px 8px;
+    font-size: 11px;
+    font-weight: bold;
+}
 QLabel#pathLabel {
     font-size: 12px;
     color: #64748b;
@@ -1686,6 +2998,36 @@ QPushButton#ghost {
 }
 QPushButton#ghost:hover {
     background-color: #f8fafc;
+}
+QPushButton#segment {
+    background-color: transparent;
+    border: 1px solid #d1d5db;
+    border-radius: 6px;
+    padding: 3px 10px;
+    color: #64748b;
+    font-size: 12px;
+    font-weight: bold;
+}
+QPushButton#segment:hover {
+    background-color: #f8fafc;
+}
+QPushButton#segment:checked {
+    background-color: #dbeafe;
+    border-color: #bfdbfe;
+    color: #1d4ed8;
+}
+QPushButton#segment:checked:hover {
+    background-color: #dbeafe;
+}
+QPushButton#segment:disabled {
+    background-color: #f9fafb;
+    border-color: #e5e7eb;
+    color: #9ca3af;
+}
+QPushButton#segment:checked:disabled {
+    background-color: #eff6ff;
+    border-color: #dbeafe;
+    color: #93c5fd;
 }
 QPushButton#small {
     padding: 3px 10px;
@@ -1848,6 +3190,10 @@ QLabel#badge {
     background-color: #1e3a8a;
     color: #bfdbfe;
 }
+QLabel#scopeBadge {
+    background-color: #064e3b;
+    color: #a7f3d0;
+}
 QLabel#pathLabel {
     color: #94a3b8;
 }
@@ -1922,6 +3268,36 @@ QPushButton#ghost {
 QPushButton#ghost:hover {
     background-color: #1f2937;
 }
+QPushButton#segment {
+    background-color: transparent;
+    border: 1px solid #334155;
+    border-radius: 6px;
+    padding: 3px 10px;
+    color: #94a3b8;
+    font-size: 12px;
+    font-weight: bold;
+}
+QPushButton#segment:hover {
+    background-color: #1e293b;
+}
+QPushButton#segment:checked {
+    background-color: #1e3a8a;
+    border-color: #1d4ed8;
+    color: #bfdbfe;
+}
+QPushButton#segment:checked:hover {
+    background-color: #1e3a8a;
+}
+QPushButton#segment:disabled {
+    background-color: #111827;
+    border-color: #1f2937;
+    color: #64748b;
+}
+QPushButton#segment:checked:disabled {
+    background-color: #172554;
+    border-color: #1e3a8a;
+    color: #93c5fd;
+}
 QToolButton#copyButton:hover {
     background-color: #1e293b;
     border-color: #334155;
@@ -1953,10 +3329,21 @@ class SearchWorker(QThread):
     BATCH_SIZE = 256
     BATCH_INTERVAL = 0.10
 
-    def __init__(self, root, name, parent=None):
+    def __init__(
+        self,
+        root,
+        name,
+        parent=None,
+        mode=SEARCH_MODE_FUNCTION,
+    ):
         super().__init__(parent)
         self.root = root
         self.name = name
+        self.mode = (
+            SEARCH_MODE_VARIABLE
+            if mode == SEARCH_MODE_VARIABLE
+            else SEARCH_MODE_FUNCTION
+        )
         self.stop_event = threading.Event()
         self.engine = SearchEngine(self.stop_event, self._emit_progress)
 
@@ -1981,7 +3368,7 @@ class SearchWorker(QThread):
             self.results_ready.emit(batch)
 
         try:
-            for result in self.engine.search(self.root, self.name):
+            for result in self.engine.search(self.root, self.name, self.mode):
                 if self.stop_event.is_set():
                     break
                 pending.append(result)
@@ -2003,7 +3390,7 @@ class SearchWorker(QThread):
 
 
 def result_to_text(result):
-    """返回可复制的函数实现代码。"""
+    """返回可复制的函数实现或变量定义代码。"""
     return result.implementation
 
 
@@ -2107,6 +3494,8 @@ class ResultCard(QFrame):
         super().__init__(parent)
         self.result = result
         self.lang = lang
+        self.kind = getattr(result, "kind", SEARCH_MODE_FUNCTION)
+        self.scope = getattr(result, "scope", "")
         self.setObjectName("card")
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum)
 
@@ -2128,10 +3517,17 @@ class ResultCard(QFrame):
         name_label.setObjectName("funcName")
         badge = QLabel(result.language)
         badge.setObjectName("badge")
+        self.scope_label = QLabel()
+        self.scope_label.setObjectName("scopeBadge")
+        self.scope_label.setVisible(
+            self.kind == SEARCH_MODE_VARIABLE and bool(self.scope)
+        )
         self.range_label = QLabel()
         self.range_label.setObjectName("muted")
         header.addWidget(name_label)
         header.addWidget(badge)
+        if self.kind == SEARCH_MODE_VARIABLE:
+            header.addWidget(self.scope_label)
         header.addStretch(1)
         header.addWidget(self.range_label, 0, Qt.AlignmentFlag.AlignVCenter)
         layout.addLayout(header)
@@ -2165,7 +3561,12 @@ class ResultCard(QFrame):
             Qt.TextInteractionFlag.TextSelectableByMouse
         )
         self.sig_copy_btn = CopyButton(
-            lang, tooltip_key="copy_signature_tooltip"
+            lang,
+            tooltip_key=(
+                "copy_variable_signature_tooltip"
+                if self.kind == SEARCH_MODE_VARIABLE
+                else "copy_signature_tooltip"
+            ),
         )
         self.sig_copy_btn.clicked.connect(self.copy_signature)
         sig_layout.addWidget(self.signature_label, 1)
@@ -2186,6 +3587,11 @@ class ResultCard(QFrame):
         self.impl_label.setObjectName("codeLabel")
         self.copy_btn = CopyButton(
             lang,
+            tooltip_key=(
+                "copy_variable_tooltip"
+                if self.kind == SEARCH_MODE_VARIABLE
+                else "copy_tooltip"
+            ),
             icon_color="#94a3b8",
             object_name="copyButtonDark",
         )
@@ -2224,7 +3630,14 @@ class ResultCard(QFrame):
             tr(lang, "lines_range", start=self.result.start_line,
                end=self.result.end_line)
         )
-        self.impl_label.setText(tr(lang, "implementation"))
+        if self.kind == SEARCH_MODE_VARIABLE:
+            self.impl_label.setText(tr(lang, "variable_definition"))
+            if self.scope:
+                self.scope_label.setText(
+                    tr(lang, f"scope_{self.scope}")
+                )
+        else:
+            self.impl_label.setText(tr(lang, "implementation"))
         self.copy_btn.set_language(lang)
         self.sig_copy_btn.set_language(lang)
 
@@ -2568,6 +3981,12 @@ class MainWindow(QMainWindow):
         self.lang = self.settings.value("language", "zh", type=str)
         if self.lang not in ("zh", "en"):
             self.lang = "zh"
+        self.search_mode = self.settings.value(
+            "search_mode", SEARCH_MODE_FUNCTION, type=str
+        )
+        if self.search_mode not in SEARCH_MODES:
+            self.search_mode = SEARCH_MODE_FUNCTION
+        self.current_mode = self.search_mode
         self.worker = None
         self.workers = set()
         self.search_generation = 0
@@ -2658,9 +4077,35 @@ class MainWindow(QMainWindow):
         self.path_status.setWordWrap(True)
         panel_layout.addWidget(self.path_status)
 
+        search_label_row = QHBoxLayout()
+        search_label_row.setSpacing(6)
         self.search_label = QLabel()
         self.search_label.setObjectName("fieldLabel")
-        panel_layout.addWidget(self.search_label)
+        self.func_mode_btn = QPushButton()
+        self.func_mode_btn.setObjectName("segment")
+        self.func_mode_btn.setCheckable(True)
+        self.func_mode_btn.setAutoExclusive(True)
+        self.func_mode_btn.setFixedHeight(26)
+        self.func_mode_btn.setMinimumWidth(64)
+        self.func_mode_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.var_mode_btn = QPushButton()
+        self.var_mode_btn.setObjectName("segment")
+        self.var_mode_btn.setCheckable(True)
+        self.var_mode_btn.setAutoExclusive(True)
+        self.var_mode_btn.setFixedHeight(26)
+        self.var_mode_btn.setMinimumWidth(64)
+        self.var_mode_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.func_mode_btn.setChecked(
+            self.search_mode == SEARCH_MODE_FUNCTION
+        )
+        self.var_mode_btn.setChecked(
+            self.search_mode == SEARCH_MODE_VARIABLE
+        )
+        search_label_row.addWidget(self.search_label)
+        search_label_row.addStretch(1)
+        search_label_row.addWidget(self.func_mode_btn)
+        search_label_row.addWidget(self.var_mode_btn)
+        panel_layout.addLayout(search_label_row)
 
         search_row = QHBoxLayout()
         search_row.setSpacing(8)
@@ -2722,6 +4167,12 @@ class MainWindow(QMainWindow):
         self.browse_btn.clicked.connect(self.browse_directory)
         self.apply_btn.clicked.connect(self.apply_directory)
         self.path_edit.returnPressed.connect(self.apply_directory)
+        self.func_mode_btn.clicked.connect(
+            lambda: self.set_search_mode(SEARCH_MODE_FUNCTION)
+        )
+        self.var_mode_btn.clicked.connect(
+            lambda: self.set_search_mode(SEARCH_MODE_VARIABLE)
+        )
         self.search_btn.clicked.connect(self.start_search)
         self.stop_btn.clicked.connect(self.stop_search)
         self.search_edit.returnPressed.connect(self.start_search)
@@ -2767,8 +4218,7 @@ class MainWindow(QMainWindow):
         self.path_edit.setPlaceholderText(tr(self.lang, "path_placeholder"))
         self.browse_btn.setText(tr(self.lang, "browse"))
         self.apply_btn.setText(tr(self.lang, "apply"))
-        self.search_label.setText(tr(self.lang, "function_name"))
-        self.search_edit.setPlaceholderText(tr(self.lang, "search_placeholder"))
+        self._update_search_mode_texts()
         self.search_btn.setText(tr(self.lang, "search"))
         self.stop_btn.setText(tr(self.lang, "stop"))
         self._update_hint()
@@ -2784,8 +4234,47 @@ class MainWindow(QMainWindow):
         self._render_path_status()
         self.results_view.apply_language(self.lang)
 
+    def set_search_mode(self, mode, persist=True):
+        if mode not in SEARCH_MODES:
+            return
+        self.search_mode = mode
+        self.func_mode_btn.setChecked(mode == SEARCH_MODE_FUNCTION)
+        self.var_mode_btn.setChecked(mode == SEARCH_MODE_VARIABLE)
+        if persist:
+            self.settings.setValue("search_mode", mode)
+        self._update_search_mode_texts()
+        self._update_hint()
+        self._update_empty_label()
+        if self._empty_visible_now():
+            self.results_view.set_empty_visible(True)
+        self.search_edit.setFocus()
+
+    def _empty_visible_now(self):
+        return not self.results_view.results
+
+    def _update_search_mode_texts(self):
+        variable = self.search_mode == SEARCH_MODE_VARIABLE
+        self.search_label.setText(
+            tr(self.lang, "variable_name" if variable else "function_name")
+        )
+        self.search_edit.setPlaceholderText(
+            tr(
+                self.lang,
+                "variable_placeholder" if variable else "search_placeholder",
+            )
+        )
+        self.func_mode_btn.setText(tr(self.lang, "mode_function"))
+        self.var_mode_btn.setText(tr(self.lang, "mode_variable"))
+        self.func_mode_btn.setToolTip(tr(self.lang, "mode_function_tooltip"))
+        self.var_mode_btn.setToolTip(tr(self.lang, "mode_variable_tooltip"))
+
     def _update_hint(self):
-        hint = tr(self.lang, "hint")
+        hint_key = (
+            "variable_hint"
+            if self.search_mode == SEARCH_MODE_VARIABLE
+            else "hint"
+        )
+        hint = tr(self.lang, hint_key)
         engine = SearchEngine.backend_name()
         if engine != "ripgrep":
             hint += "\n" + tr(self.lang, "hint_install_rg", engine=engine)
@@ -2821,7 +4310,16 @@ class MainWindow(QMainWindow):
 
     def _render_status(self):
         key, kwargs, error = self.status_state
-        text = tr(self.lang, key, **kwargs)
+        render_kwargs = dict(kwargs)
+        kind_mode = render_kwargs.pop("kind_mode", None)
+        if kind_mode is not None:
+            kind_key = (
+                "kind_variable"
+                if kind_mode == SEARCH_MODE_VARIABLE
+                else "kind_function"
+            )
+            render_kwargs["kind"] = tr(self.lang, kind_key)
+        text = tr(self.lang, key, **render_kwargs)
         if self.status_label.text() != text:
             self.status_label.setText(text)
         self._set_label_state(self.status_label, error)
@@ -2843,9 +4341,16 @@ class MainWindow(QMainWindow):
             self.count_label.setText(text)
 
     def _update_empty_label(self):
+        variable = self.search_mode == SEARCH_MODE_VARIABLE
         key = {
-            "initial": "empty_initial",
-            "no_results": "empty_no_results",
+            "initial": (
+                "empty_initial_variable" if variable else "empty_initial"
+            ),
+            "no_results": (
+                "empty_no_results_variable"
+                if variable
+                else "empty_no_results"
+            ),
             "failed": "empty_failed",
         }.get(self.empty_state, "empty_initial")
         self.results_view.set_empty_text(tr(self.lang, key))
@@ -2854,24 +4359,30 @@ class MainWindow(QMainWindow):
         if not self._stats_timer.isActive():
             self._stats_timer.start()
 
+    def _status_kind_kwargs(self):
+        return {"kind_mode": self.current_mode}
+
     def _flush_stats(self):
         if self.worker is None or not self.worker.isRunning():
             return
         if self._stop_requested:
             return
         self._update_count_label()
+        kind_kwargs = self._status_kind_kwargs()
         if self._last_scanned:
             self._set_status(
                 "searching_progress",
                 name=self.current_name,
                 scanned=self._last_scanned,
                 count=self.result_count,
+                **kind_kwargs,
             )
         else:
             self._set_status(
                 "searching_found",
                 name=self.current_name,
                 count=self.result_count,
+                **kind_kwargs,
             )
 
     @staticmethod
@@ -2887,6 +4398,8 @@ class MainWindow(QMainWindow):
         # 窗口操作不因搜索而禁用，新搜索会取消旧搜索
         self.stop_btn.setEnabled(active)
         self.progress.setVisible(active)
+        self.func_mode_btn.setEnabled(not active)
+        self.var_mode_btn.setEnabled(not active)
 
     # -- 目录配置 -----------------------------------------------------------
 
@@ -2920,12 +4433,26 @@ class MainWindow(QMainWindow):
     # -- 搜索流程 -----------------------------------------------------------
 
     def start_search(self):
+        variable = self.search_mode == SEARCH_MODE_VARIABLE
         name = self.search_edit.text().strip()
         if not name:
-            self._set_status("error_empty_name", error=True)
+            self._set_status(
+                "error_empty_variable_name" if variable else "error_empty_name",
+                error=True,
+            )
             return
-        if not re.fullmatch(r"~?[A-Za-z_$][A-Za-z0-9_$]*", name):
-            self._set_status("error_invalid_name", error=True)
+        name_pattern = (
+            r"[A-Za-z_$][A-Za-z0-9_$]*"
+            if variable
+            else r"~?[A-Za-z_$][A-Za-z0-9_$]*"
+        )
+        if not re.fullmatch(name_pattern, name):
+            self._set_status(
+                "error_invalid_variable_name"
+                if variable
+                else "error_invalid_name",
+                error=True,
+            )
             return
 
         raw = self.path_edit.text().strip()
@@ -2951,6 +4478,7 @@ class MainWindow(QMainWindow):
         self.search_base_dir = self.base_dir
 
         self.current_name = name
+        self.current_mode = self.search_mode
         self.result_count = 0
         self._last_scanned = 0
         self.has_searched = True
@@ -2963,7 +4491,9 @@ class MainWindow(QMainWindow):
             "searching", name=name, engine=SearchEngine.backend_name()
         )
 
-        worker = SearchWorker(self.base_dir, name, self)
+        worker = SearchWorker(
+            self.base_dir, name, self, self.current_mode
+        )
         self.worker = worker
         self.workers.add(worker)
         worker.results_ready.connect(
@@ -3049,7 +4579,11 @@ class MainWindow(QMainWindow):
         self._set_searching(False)
         key = "stopped_summary" if stopped else "finished_summary"
         self._set_status(
-            key, scanned=scanned, count=self.result_count, seconds=elapsed
+            key,
+            scanned=scanned,
+            count=self.result_count,
+            seconds=elapsed,
+            **self._status_kind_kwargs(),
         )
         self._update_count_label()
         if self.result_count == 0:

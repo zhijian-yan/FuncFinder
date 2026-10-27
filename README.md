@@ -1,31 +1,35 @@
 # FuncFinder
 
-**在任意代码目录中快速定位函数定义和完整实现。**
-**Find function definitions and full implementations in any codebase.**
+**在任意代码目录中快速定位函数、变量和常量的定义。**
+**Find function, variable, and constant definitions in any codebase.**
 
 [![CI](https://github.com/zhijian-yan/FuncFinder/actions/workflows/ci.yml/badge.svg)](https://github.com/zhijian-yan/FuncFinder/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/zhijian-yan/FuncFinder?display_name=tag&sort=semver)](https://github.com/zhijian-yan/FuncFinder/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
 
-![FuncFinder 主界面](docs/screenshot.png)
+![FuncFinder 变量模式主界面](docs/screenshot.png)
 
 ## 简介
 
 FuncFinder 是一个基于 Python + PySide6/Qt 6 的桌面工具。选择一个代码目录，
-输入函数名，它会搜索函数定义并把签名、文件位置、行号和完整实现展示成卡片，
-适合在大型项目中快速阅读不熟悉的代码。
+在「函数」或「变量」模式下输入名称，它会搜索定义并把签名、文件位置、行号和
+完整代码展示成卡片，适合在大型项目中快速阅读不熟悉的代码。
 
 它不是语言服务器，也不依赖编译器索引；它通过扩展名识别语言，并用启发式规则
-提取函数边界。因此对常见代码足够快，也允许在混合语言目录中直接使用。
+提取函数边界和变量声明。因此对常见代码足够快，也允许在混合语言目录中直接使用。
 
 ## 功能
 
+- **函数与变量**：两种搜索模式共用同一个代码目录和结果视图，可随时切换。
+- **变量定义**：支持全局/局部变量、常量、结构体/类字段、Python
+  `self.attr` 实例属性，并标注结果的作用域。
 - **多语言**：C/C++、Python、Go、Rust、Java、C#、JavaScript/TypeScript、
-  Kotlin、Scala、Swift、Dart、Objective-C（C 函数部分）。
+  Kotlin、Scala、Swift、Dart、Objective-C（C 函数/变量部分）。
 - **快速搜索**：优先使用 `ripgrep`，其次系统 `grep`，最后纯 Python 扫描。
 - **后台搜索**：搜索在工作线程执行，界面不卡顿，可随时停止。
-- **完整实现**：不仅显示定义行，还会根据花括号/缩进提取整个函数体。
+- **完整实现**：不仅显示定义行，还会根据花括号/缩进提取整个函数体；
+  变量模式会包含多行初始值。
 - **语法高亮**：按语言高亮关键字、字符串、注释和数字。
 - **结果操作**：单条复制、复制全部、显示文件位置和行号。
 - **桌面体验**：浅色/深色主题、中英文切换、窗口/任务栏图标。
@@ -50,6 +54,21 @@ FuncFinder 是一个基于 Python + PySide6/Qt 6 的桌面工具。选择一个�
 | Scala | `.scala` |
 | Swift | `.swift` |
 | Dart | `.dart` |
+
+变量模式使用同一套扩展名识别规则，支持：
+
+- C/C++、Objective-C：全局/局部变量、常量、结构体/类字段、静态成员定义。
+- Python：模块赋值、`class` 属性、函数局部变量、`self.attr`/`cls.attr`
+  实例属性、类型注解和多目标解包。
+- JavaScript/TypeScript：`const`/`let`/`var`、类字段、解构赋值。
+- Go：`var`/`const`（含分组声明）、`:=` 短声明、结构体字段。
+- Rust：`let`、`static`、`const`、结构体字段和 `impl` 中的关联常量。
+- Java/C#：字段与局部变量；属性（property）会被排除。
+- Kotlin/Scala/Swift/Dart：`val`/`var`/`let`/`final`/`const` 以及字段。
+
+结果卡片会显示变量作用域（全局变量、局部变量、成员变量、类属性、
+实例属性等）。变量提取同样是启发式的，赋值和声明会尽量区分，但复杂宏、
+隐式声明或动态语言中的重绑定仍可能需要人工确认。
 
 ## 快速开始
 
@@ -92,12 +111,18 @@ FUNC_FINDER_BACKEND=python python func_finder.py
 ## 使用
 
 1. 启动程序，点击「选择目录」指定代码目录。
-2. 输入函数名（例如 `i2c_transfer`、`parse_config`、`main`）。
-3. 点击「搜索」，结果会以卡片形式显示。
-4. 使用卡片上的复制按钮复制完整实现，或点击「复制全部」。
-5. 右上角可以切换主题和语言；配置会自动保存。
+2. 在搜索框上方选择「函数」或「变量」。
+3. 输入名称，例如函数 `i2c_transfer`、`parse_config`、`main`，
+   或变量 `MAX_BUFFER_SIZE`、`config`、`timeout`。
+4. 点击「搜索」，结果会以卡片形式显示。
+5. 使用卡片上的复制按钮复制完整实现或变量定义，或点击「复制全部」。
+6. 右上角可以切换主题和语言；搜索模式、主题等配置会自动保存。
 
-支持的函数名包括字母、数字、下划线、`$`，且不能以数字开头。
+名称可以包含字母、数字、下划线、`$`，且不能以数字开头。变量模式会搜索
+文件中的声明和定义；卡片中的路径标签可悬停查看完整路径。
+
+> 提示：切换「函数」/「变量」只影响下一次搜索；已经显示的结果卡片会保留
+> 自己的类型和标签。搜索进行中模式按钮会暂时禁用，点击「停止」后可切换。
 
 ## 命令行
 
@@ -180,7 +205,11 @@ Linux/Windows 单文件包并创建 GitHub Release。
 
 ## 已知限制
 
-- 函数提取是启发式的，宏、复杂模板、重载和嵌套定义可能需要人工确认。
+- 函数和变量提取都是启发式的，宏、复杂模板、重载和嵌套定义可能需要人工确认。
+- 变量模式不会跟踪类型或跨文件符号；`obj.attr` 这类没有类型信息的属性赋值
+  默认不视为变量定义（Python 的 `self.attr`/`cls.attr` 除外）。
+- C/C++ 的 `extern` 变量声明也会作为变量结果出现，它们可能不是实际定义；
+  如果需要严格区分声明与定义，请结合编译产物或 LSP 使用。
 - 超大目录建议安装 `ripgrep`，否则首次搜索会明显变慢。
 - 本项目目前只提供 Linux/Windows 打包脚本；macOS 打包需要自行调整。
 - 桌面图标集成只针对 Linux/GNOME；其他桌面环境通常也能读取 `.desktop`。
