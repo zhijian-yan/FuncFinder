@@ -4,6 +4,41 @@ All notable changes to FuncFinder are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and this project follows [Semantic Versioning](https://semver.org/).
 
+## [v0.3.0] - 2026-10-27
+
+### Added
+
+- Color-coded variable scopes: global, local, member, class/instance attribute,
+  and type-member results now use distinct badge colors, card accent stripes,
+  and matching variable-name highlight colors in the code view.
+- Case-sensitivity toggle. It is on by default; turning it off matches `A` and
+  `a` equally while results keep the original spelling from the source.
+- Case-insensitive searches now use `ripgrep`/`grep` with `-i` when available
+  instead of falling back to Python, while still resolving the actual spelling
+  from the source line.
+- The pure-Python literal scanner now performs a cheap name-token prefilter
+  before the full declaration candidate expression, so it no longer evaluates
+  that heavier expression on every source line.
+- Result sorting by default order, name, file path, scope, or language, with an
+  ascending/descending toggle.
+- Result filtering by text (name, path, language, or signature; multiple terms
+  use AND) and by function/global/local/member/class/instance/type scope. The
+  count label shows visible/total results, and Copy all only copies the
+  currently visible results.
+- A persistent small engine label below the search row. It shows the active
+  backend even before a search starts, replacing the engine text that was only
+  visible in the search status.
+- The Match-case option button now aligns with the search input and
+  Search/Stop buttons.
+- Unit tests for case sensitivity, grep-backed case-insensitive search,
+  filtering, sorting, and scope colors.
+
+### Changed
+
+- Updated README usage and limitations for scope colors, case sensitivity,
+  sorting, and filtering.
+- Bumped the application version to 0.3.0.
+
 ## [v0.2.0] - 2026-10-27
 
 ### Added
@@ -48,5 +83,6 @@ and this project follows [Semantic Versioning](https://semver.org/).
 - Function extraction is heuristic and may need manual review for complex
   macros, templates, overloads, or nested definitions.
 
+[v0.3.0]: https://github.com/zhijian-yan/FuncFinder/releases/tag/v0.3.0
 [v0.2.0]: https://github.com/zhijian-yan/FuncFinder/releases/tag/v0.2.0
 [v0.1.0]: https://github.com/zhijian-yan/FuncFinder/releases/tag/v0.1.0

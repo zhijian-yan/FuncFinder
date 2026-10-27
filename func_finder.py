@@ -6,11 +6,15 @@
     1. 配置任意代码目录（自动保存，跨平台）；
     2. 在「函数」模式下输入函数名，搜索其定义与完整实现；
        在「变量」模式下输入变量名，搜索变量/常量的声明与初始值；
+       可用「区分大小写」开关控制是否忽略大小写；
     3. 结果以卡片形式展示签名、来源、行号及完整代码，代码带语法高亮；
-    4. 支持单条/全部复制结果，以及浅色/深色主题切换；
-    5. 搜索在后台线程执行，可随时停止；结果列表按需渲染，
+       变量结果用不同颜色区分全局/局部/成员等作用域；
+    4. 支持按名称/文件/作用域/语言排序和按文本/作用域筛选，结果数显示
+       当前显示/总数；搜索框下方常驻显示当前搜索引擎；
+    5. 支持单条/全部复制结果，以及浅色/深色主题切换；
+    6. 搜索在后台线程执行，可随时停止；结果列表按需渲染，
        即使命中大量结果，切换主题/语言或继续输入也不会卡顿；
-    6. 使用 assets/ 下的 FF 图标作为窗口和桌面图标；Linux 下首次运行
+    7. 使用 assets/ 下的 FF 图标作为窗口和桌面图标；Linux 下首次运行
        会自动注册桌面入口（Ubuntu Dock 图标），也可用 --install-desktop
        手动注册。
 
@@ -72,6 +76,7 @@ try:
     )
     from PySide6.QtWidgets import (
         QApplication,
+        QComboBox,
         QFileDialog,
         QFrame,
         QGraphicsDropShadowEffect,
@@ -96,7 +101,7 @@ except ImportError as exc:  # pragma: no cover - 仅在缺少依赖时触发
     )
 
 APP_NAME = "FuncFinder"
-__version__ = "0.2.0"
+__version__ = "0.3.0"
 SEARCH_MODE_FUNCTION = "function"
 SEARCH_MODE_VARIABLE = "variable"
 SEARCH_MODES = (SEARCH_MODE_FUNCTION, SEARCH_MODE_VARIABLE)
@@ -536,6 +541,8 @@ TRANSLATIONS = {
         "variable_name": "变量名称",
         "search_placeholder": "例如：i2c_transfer、parse_config、main",
         "variable_placeholder": "例如：MAX_BUFFER_SIZE、config、timeout",
+        "case_sensitive": "区分大小写",
+        "case_sensitive_tooltip": "区分大小写；关闭后 A 和 a 视为相同",
         "search": "搜索",
         "stop": "停止",
         "hint": (
@@ -545,17 +552,32 @@ TRANSLATIONS = {
         "variable_hint": (
             "支持全局/局部变量、常量以及结构体/类字段，覆盖与函数模式相同的语言"
         ),
-        "hint_install_rg": (
-            "当前使用 {engine} 引擎；安装 ripgrep（rg）可显著加快搜索。"
-        ),
+        "hint_case_insensitive": "不区分大小写：A 与 a 视为相同。",
+        "engine_label": "引擎：{engine}",
+        "engine_tooltip_install": "安装 ripgrep（rg）可显著加快搜索。",
         "status_initial": "请先配置代码目录",
         "status_ready": "代码目录已就绪，输入名称开始搜索",
         "status_not_configured": "尚未配置代码目录",
         "status_invalid_dir": "代码目录无效",
         "results_title": "搜索结果",
         "results_count": "{count} 个结果",
+        "results_count_filtered": "{visible} / {total} 个结果",  # noun 不参与中文
+        "filter_results_placeholder": "筛选结果：名称、路径、语言或签名",
+        "filter_results_tooltip": "筛选当前结果；空格分隔多个关键词",
+        "scope_filter_all": "全部作用域",
+        "sort_default": "默认顺序",
+        "sort_name": "名称",
+        "sort_path": "文件",
+        "sort_scope": "作用域",
+        "sort_language": "语言",
+        "sort_order_asc_tooltip": "当前升序，点击切换为降序",
+        "sort_order_desc_tooltip": "当前降序，点击切换为升序",
+        "empty_filtered": (
+            "没有符合筛选条件的结果\n"
+            "请调整筛选条件，或清空筛选框"
+        ),
         "copy_all": "复制全部",
-        "copy_all_tooltip": "复制当前所有搜索结果的代码",
+        "copy_all_tooltip": "复制当前显示的所有结果代码",
         "empty_initial": (
             "配置代码目录，输入函数名开始搜索\n"
             "支持 C/C++、Python、Go、Rust、Java、C#、JavaScript/TypeScript、"
@@ -587,7 +609,7 @@ TRANSLATIONS = {
             "变量名不合法：只能包含字母、数字、下划线、$，且不能以数字开头。"
         ),
         "error_no_dir": "请先配置有效的代码目录。",
-        "searching": "正在搜索 “{name}” ...（引擎：{engine}）",
+        "searching": "正在搜索 “{name}” ...",
         "stopping": "正在停止搜索 “{name}” ...",
         "kind_function": "函数",
         "kind_variable": "变量",
@@ -640,6 +662,10 @@ TRANSLATIONS = {
         "variable_name": "Variable name",
         "search_placeholder": "e.g. i2c_transfer, parse_config, main",
         "variable_placeholder": "e.g. MAX_BUFFER_SIZE, config, timeout",
+        "case_sensitive": "Match case",
+        "case_sensitive_tooltip": (
+            "Match case; when off, A and a are treated the same"
+        ),
         "search": "Search",
         "stop": "Stop",
         "hint": (
@@ -650,8 +676,11 @@ TRANSLATIONS = {
             "Supports global/local variables, constants, and struct/class fields "
             "across the same languages as function search."
         ),
-        "hint_install_rg": (
-            "Searching with the {engine} engine. "
+        "hint_case_insensitive": (
+            "Case-insensitive: A and a are treated the same."
+        ),
+        "engine_label": "Engine: {engine}",
+        "engine_tooltip_install": (
             "Install ripgrep (rg) for much faster searches."
         ),
         "status_initial": "Configure a code directory first",
@@ -660,8 +689,27 @@ TRANSLATIONS = {
         "status_invalid_dir": "Invalid code directory",
         "results_title": "Results",
         "results_count": "{count} results",
+        "results_count_filtered": "{visible} / {total} {noun}",
+        "filter_results_placeholder": (
+            "Filter results: name, path, language, or signature"
+        ),
+        "filter_results_tooltip": (
+            "Filter current results; separate multiple terms with spaces"
+        ),
+        "scope_filter_all": "All scopes",
+        "sort_default": "Default order",
+        "sort_name": "Name",
+        "sort_path": "File",
+        "sort_scope": "Scope",
+        "sort_language": "Language",
+        "sort_order_asc_tooltip": "Ascending; click to switch to descending",
+        "sort_order_desc_tooltip": "Descending; click to switch to ascending",
+        "empty_filtered": (
+            "No results match the current filters\n"
+            "Adjust the filters or clear the filter text"
+        ),
         "copy_all": "Copy all",
-        "copy_all_tooltip": "Copy the code of all current results",
+        "copy_all_tooltip": "Copy the code of all currently displayed results",
         "empty_initial": (
             "Configure a code directory and enter a function name to start\n"
             "Supports C/C++, Python, Go, Rust, Java, C#, JavaScript/TypeScript, "
@@ -695,7 +743,7 @@ TRANSLATIONS = {
             "and do not start with a digit."
         ),
         "error_no_dir": "Configure a valid code directory first.",
-        "searching": "Searching for “{name}” ... (engine: {engine})",
+        "searching": "Searching for “{name}” ...",
         "stopping": "Stopping “{name}” ...",
         "kind_function": "function",
         "kind_variable": "variable",
@@ -749,6 +797,17 @@ def results_count_text(lang, count):
     return tr(lang, "results_count", count=count)
 
 
+def results_count_filtered_text(lang, visible, total):
+    noun = "result" if total == 1 else "results"
+    return tr(
+        lang,
+        "results_count_filtered",
+        visible=visible,
+        total=total,
+        noun=noun,
+    )
+
+
 @dataclass
 class SearchResult:
     name: str
@@ -762,6 +821,114 @@ class SearchResult:
     kind: str = SEARCH_MODE_FUNCTION
     # 变量所在作用域：global / local / member / class / instance / type。
     scope: str = ""
+
+
+# 代码区始终使用深色背景，这里的颜色是变量名在该背景上的高亮色。
+# 卡片徽标和左侧强调条使用 QSS 中同色系的浅色/深色版本。
+SCOPE_CODE_COLORS = {
+    "global": "#60a5fa",
+    "local": "#4ade80",
+    "member": "#c084fc",
+    "class": "#fde047",
+    "instance": "#22d3ee",
+    "type": "#fb7185",
+}
+DEFAULT_NAME_COLOR = "#fbbf24"
+
+# 结果工具栏使用的筛选/排序键。
+RESULT_SORT_KEYS = ("default", "name", "path", "scope", "language")
+RESULT_SCOPE_FILTERS = (
+    "all",
+    "function",
+    "global",
+    "local",
+    "member",
+    "class",
+    "instance",
+    "type",
+)
+_SCOPE_SORT_RANK = {
+    "global": 0,
+    "local": 1,
+    "member": 2,
+    "class": 3,
+    "instance": 4,
+    "type": 5,
+}
+
+
+def result_matches_filter(result, filter_text, scope_filter="all"):
+    """判断结果是否匹配文本筛选和作用域筛选（文本按空格分隔取 AND）。"""
+    if scope_filter == "function":
+        if result.kind != SEARCH_MODE_FUNCTION:
+            return False
+    elif scope_filter != "all":
+        if result.kind != SEARCH_MODE_VARIABLE or result.scope != scope_filter:
+            return False
+
+    terms = (filter_text or "").strip().casefold().split()
+    if not terms:
+        return True
+    haystack = "\n".join(
+        (
+            result.name,
+            result.path,
+            result.language,
+            result.signature,
+            result.scope,
+            result.kind,
+        )
+    ).casefold()
+    return all(term in haystack for term in terms)
+
+
+def sort_search_results(results, sort_key="default", descending=False):
+    """返回排序后的结果副本；排序稳定，未知键按默认顺序处理。"""
+    items = list(results)
+    if sort_key == "default":
+        if descending:
+            items.reverse()
+        return items
+    if sort_key == "name":
+        def key(result):
+            return (
+                result.name.casefold(),
+                result.path.casefold(),
+                result.start_line,
+                result.end_line,
+            )
+    elif sort_key == "path":
+        def key(result):
+            return (
+                result.path.casefold(),
+                result.start_line,
+                result.name.casefold(),
+            )
+    elif sort_key == "scope":
+        def key(result):
+            rank = (
+                -1
+                if result.kind == SEARCH_MODE_FUNCTION
+                else _SCOPE_SORT_RANK.get(result.scope, 99)
+            )
+            return (
+                rank,
+                result.name.casefold(),
+                result.path.casefold(),
+                result.start_line,
+            )
+    elif sort_key == "language":
+        def key(result):
+            return (
+                result.language.casefold(),
+                result.name.casefold(),
+                result.path.casefold(),
+                result.start_line,
+            )
+    else:
+        return items
+    items.sort(key=key, reverse=descending)
+    return items
 
 
 # ---------------------------------------------------------------------------
@@ -2418,6 +2585,34 @@ class _FileCache:
         return self.lines
 
 
+# 不区分大小写搜索先把每一行拆成标识符，再用 fullmatch 要求整个名称
+# 匹配；这样 ``config`` 不会命中 ``config_loader``，同时把源码中的实际
+# 拼写交给提取器。
+_FUNCTION_IDENTIFIER_RE = re.compile(r"~?[A-Za-z_$][A-Za-z0-9_$]*")
+_VARIABLE_IDENTIFIER_RE = re.compile(r"[A-Za-z_$][A-Za-z0-9_$]*")
+
+
+def _case_insensitive_name_matches(line, pattern, mode):
+    """返回一行中完整匹配不区分大小写 pattern 的标识符。"""
+    token_re = (
+        _FUNCTION_IDENTIFIER_RE
+        if mode == SEARCH_MODE_FUNCTION
+        else _VARIABLE_IDENTIFIER_RE
+    )
+    names = []
+    seen = set()
+    for match in token_re.finditer(line):
+        token = match.group(0)
+        candidates = (token, token[1:]) if token.startswith("~") else (token,)
+        for candidate in candidates:
+            if not candidate or candidate in seen:
+                continue
+            if pattern.fullmatch(candidate):
+                seen.add(candidate)
+                names.append(candidate)
+    return names
+
+
 def _escape_name(name):
     return "".join(
         "\\" + char if char in r"\.^$*+?{}[]|()" else char for char in name
@@ -2520,14 +2715,30 @@ class SearchEngine:
             except OSError:
                 pass
 
-    def search(self, root, name, mode=SEARCH_MODE_FUNCTION):
+    def search(
+        self,
+        root,
+        name,
+        mode=SEARCH_MODE_FUNCTION,
+        case_sensitive=True,
+    ):
         mode = (
             SEARCH_MODE_VARIABLE
             if mode == SEARCH_MODE_VARIABLE
             else SEARCH_MODE_FUNCTION
         )
+        case_sensitive = bool(case_sensitive)
+        if case_sensitive:
+            pattern = None
+        else:
+            # 不区分大小写时先用转义名称做候选匹配，再把源码中的实际拼写
+            # 交给提取器，保证结果保留原始大小写。
+            pattern = re.compile(re.escape(name), re.IGNORECASE)
         cache = _FileCache()
-        for path, lineno, _line in self._iter_candidates(root, name, mode):
+        emitted = set()
+        for path, lineno, line_text in self._iter_candidates(
+            root, name, mode, pattern
+        ):
             if self.stop_event.is_set():
                 return
             self.scanned += 1
@@ -2543,12 +2754,29 @@ class SearchEngine:
             if index < 0 or index >= len(lines):
                 continue
 
-            if mode == SEARCH_MODE_VARIABLE:
-                found = extract_variable(lines, index, name, language)
-                if found:
-                    signature, implementation, start_line, end_line, scope = found
-                    yield SearchResult(
-                        name=name,
+            actual_names = (
+                _case_insensitive_name_matches(line_text, pattern, mode)
+                if pattern is not None
+                else (name,)
+            )
+            for actual_name in actual_names:
+                if self.stop_event.is_set():
+                    return
+                if mode == SEARCH_MODE_VARIABLE:
+                    found = extract_variable(
+                        lines, index, actual_name, language
+                    )
+                    if not found:
+                        continue
+                    (
+                        signature,
+                        implementation,
+                        start_line,
+                        end_line,
+                        scope,
+                    ) = found
+                    result = SearchResult(
+                        name=actual_name,
                         path=path,
                         start_line=start_line,
                         end_line=end_line,
@@ -2558,37 +2786,70 @@ class SearchEngine:
                         kind=SEARCH_MODE_VARIABLE,
                         scope=scope,
                     )
-                continue
-
-            found = extract_function(lines, index, name, language)
-            if found:
-                signature, implementation, start_line, end_line = found
-                yield SearchResult(
-                    name=name,
-                    path=path,
-                    start_line=start_line,
-                    end_line=end_line,
-                    signature=signature,
-                    implementation=implementation,
-                    language=language,
-                    kind=SEARCH_MODE_FUNCTION,
-                )
+                else:
+                    found = extract_function(lines, index, actual_name, language)
+                    if not found:
+                        continue
+                    signature, implementation, start_line, end_line = found
+                    result = SearchResult(
+                        name=actual_name,
+                        path=path,
+                        start_line=start_line,
+                        end_line=end_line,
+                        signature=signature,
+                        implementation=implementation,
+                        language=language,
+                        kind=SEARCH_MODE_FUNCTION,
+                    )
+                if pattern is not None:
+                    # 同一行可能多次出现同一个名称；也只保留一个定义。
+                    key = (path, actual_name, start_line, end_line)
+                    if key in emitted:
+                        continue
+                    emitted.add(key)
+                yield result
 
     @staticmethod
     def backend_name():
         return _BACKEND_LABELS[_choose_backend()]
 
-    def _iter_candidates(self, target, name, mode=SEARCH_MODE_FUNCTION):
+    def _iter_candidates(
+        self,
+        target,
+        name,
+        mode=SEARCH_MODE_FUNCTION,
+        name_pattern=None,
+    ):
         backend = _choose_backend()
-        if mode == SEARCH_MODE_VARIABLE:
+        pattern = (
+            _build_variable_pattern(name)
+            if mode == SEARCH_MODE_VARIABLE
+            else _build_pattern(name)
+        )
+        if name_pattern is not None:
+            # 不区分大小写时 rg/grep 可以直接加 -i，比 Python 扫描快得多；
+            # 候选行仍会交给 _case_insensitive_name_matches 还原实际拼写。
             if backend == "rg":
-                pattern = _build_variable_pattern(name)
+                yield from self._iter_with_rg(
+                    shutil.which("rg"),
+                    target,
+                    pattern,
+                    ignore_case=True,
+                    fallback_name=name,
+                )
             elif backend == "grep":
-                pattern = None
+                yield from self._iter_with_grep(
+                    shutil.which("grep"),
+                    target,
+                    name,
+                    mode,
+                    ignore_case=True,
+                )
             else:
-                pattern = _build_variable_pattern(name)
-        else:
-            pattern = _build_pattern(name)
+                yield from self._iter_with_python_case_insensitive(
+                    target, name
+                )
+            return
 
         if backend == "rg":
             yield from self._iter_with_rg(
@@ -2599,13 +2860,26 @@ class SearchEngine:
                 shutil.which("grep"), target, name, mode
             )
         else:
-            yield from self._iter_with_python(target, pattern)
+            # 先用简单名称 token 过滤掉绝大多数无关行，再运行较复杂的
+            # 声明候选表达式；纯 Python 变量搜索在无 rg/grep 时也能快很多。
+            yield from self._iter_with_python(
+                target, pattern, prefilter=_name_regex(name)
+            )
 
-    def _iter_with_rg(self, rg, target, pattern):
+    def _iter_with_rg(
+        self,
+        rg,
+        target,
+        pattern,
+        ignore_case=False,
+        fallback_name=None,
+    ):
         globs = "*.{" + ",".join(
             suffix.lstrip(".") for suffix in sorted(LANGUAGE_BY_SUFFIX)
         ) + "}"
         cmd = [rg, "--no-config", "--no-messages", "--json", "--glob", globs]
+        if ignore_case:
+            cmd.append("--ignore-case")
         for excluded in EXCLUDE_DIRS:
             cmd += ["--glob", f"!**/{excluded}/**"]
         cmd += ["--regexp", pattern, "--", target]
@@ -2622,7 +2896,12 @@ class SearchEngine:
                 creationflags=creationflags,
             )
         except OSError:
-            yield from self._iter_with_python(target, pattern)
+            if fallback_name is not None:
+                yield from self._iter_with_python_case_insensitive(
+                    target, fallback_name
+                )
+            else:
+                yield from self._iter_with_python(target, pattern)
             return
 
         self.proc = proc
@@ -2655,9 +2934,16 @@ class SearchEngine:
             self.proc = None
 
     def _iter_with_grep(
-        self, grep, target, name, mode=SEARCH_MODE_FUNCTION
+        self,
+        grep,
+        target,
+        name,
+        mode=SEARCH_MODE_FUNCTION,
+        ignore_case=False,
     ):
         cmd = [grep, "-r", "-n", "-I", "-E"]
+        if ignore_case:
+            cmd.append("-i")
         for suffix in sorted(LANGUAGE_BY_SUFFIX):
             cmd += ["--include", "*" + suffix]
         for excluded in EXCLUDE_DIRS:
@@ -2680,12 +2966,17 @@ class SearchEngine:
                 bufsize=1,
             )
         except OSError:
-            fallback = (
-                _build_variable_pattern(name)
-                if mode == SEARCH_MODE_VARIABLE
-                else _build_pattern(name)
-            )
-            yield from self._iter_with_python(target, fallback)
+            if ignore_case:
+                yield from self._iter_with_python_case_insensitive(
+                    target, name
+                )
+            else:
+                fallback = (
+                    _build_variable_pattern(name)
+                    if mode == SEARCH_MODE_VARIABLE
+                    else _build_pattern(name)
+                )
+                yield from self._iter_with_python(target, fallback)
             return
 
         self.proc = proc
@@ -2713,8 +3004,9 @@ class SearchEngine:
             proc.wait()
             self.proc = None
 
-    def _iter_with_python(self, target, pattern):
+    def _iter_with_python(self, target, pattern, prefilter=None):
         regex = re.compile(pattern)
+        prefilter_regex = re.compile(prefilter) if prefilter else None
         for dirpath, dirnames, filenames in os.walk(target):
             dirnames[:] = [
                 name for name in dirnames if name not in SKIP_DIRS
@@ -2729,7 +3021,43 @@ class SearchEngine:
                 try:
                     with open(path, "r", encoding="utf-8", errors="replace") as handle:
                         for lineno, line in enumerate(handle, 1):
+                            if self.stop_event.is_set():
+                                return
+                            if (
+                                prefilter_regex is not None
+                                and not prefilter_regex.search(line)
+                            ):
+                                continue
                             if regex.search(line):
+                                yield path, lineno, line
+                except OSError:
+                    continue
+
+    def _iter_with_python_case_insensitive(self, target, name):
+        """Python 回退扫描：先用大小写不敏感的标识符边界预筛候选行。"""
+        line_regex = re.compile(
+            r"(?<![A-Za-z0-9_$])"
+            + re.escape(name)
+            + r"(?![A-Za-z0-9_$])",
+            re.IGNORECASE,
+        )
+        for dirpath, dirnames, filenames in os.walk(target):
+            dirnames[:] = [
+                name for name in dirnames if name not in SKIP_DIRS
+            ]
+            for filename in filenames:
+                suffix = os.path.splitext(filename)[1].lower()
+                if suffix not in LANGUAGE_BY_SUFFIX:
+                    continue
+                if self.stop_event.is_set():
+                    return
+                path = os.path.join(dirpath, filename)
+                try:
+                    with open(path, "r", encoding="utf-8", errors="replace") as handle:
+                        for lineno, line in enumerate(handle, 1):
+                            if self.stop_event.is_set():
+                                return
+                            if line_regex.search(line):
                                 yield path, lineno, line
                 except OSError:
                     continue
@@ -2741,7 +3069,7 @@ class SearchEngine:
 
 
 class CodeHighlighter(QSyntaxHighlighter):
-    def __init__(self, document, function_name):
+    def __init__(self, document, function_name, name_color=DEFAULT_NAME_COLOR):
         super().__init__(document)
         self.keyword_format = QTextCharFormat()
         self.keyword_format.setForeground(QColor("#93c5fd"))
@@ -2758,7 +3086,7 @@ class CodeHighlighter(QSyntaxHighlighter):
         self.number_format.setForeground(QColor("#fca5a5"))
 
         self.name_format = QTextCharFormat()
-        self.name_format.setForeground(QColor("#fbbf24"))
+        self.name_format.setForeground(QColor(name_color))
         self.name_format.setFontWeight(QFont.Weight.Bold)
 
         escaped = re.escape(function_name)
@@ -2877,6 +3205,11 @@ QLabel#hint {
     font-size: 12px;
     color: #94a3b8;
 }
+QLabel#engine {
+    font-size: 11px;
+    color: #94a3b8;
+    padding-top: 1px;
+}
 QLabel#empty {
     font-size: 13px;
     color: #94a3b8;
@@ -2891,6 +3224,24 @@ QFrame#card {
     background-color: #ffffff;
     border: 1px solid #e5e7eb;
     border-radius: 12px;
+}
+QFrame#card[scope="global"] {
+    border-left: 4px solid #2563eb;
+}
+QFrame#card[scope="local"] {
+    border-left: 4px solid #059669;
+}
+QFrame#card[scope="member"] {
+    border-left: 4px solid #7c3aed;
+}
+QFrame#card[scope="class"] {
+    border-left: 4px solid #d97706;
+}
+QFrame#card[scope="instance"] {
+    border-left: 4px solid #0891b2;
+}
+QFrame#card[scope="type"] {
+    border-left: 4px solid #e11d48;
 }
 QLabel#funcName {
     font-size: 16px;
@@ -2912,6 +3263,30 @@ QLabel#scopeBadge {
     padding: 2px 8px;
     font-size: 11px;
     font-weight: bold;
+}
+QLabel#scopeBadge[scope="global"] {
+    background-color: #dbeafe;
+    color: #1d4ed8;
+}
+QLabel#scopeBadge[scope="local"] {
+    background-color: #d1fae5;
+    color: #047857;
+}
+QLabel#scopeBadge[scope="member"] {
+    background-color: #ede9fe;
+    color: #6d28d9;
+}
+QLabel#scopeBadge[scope="class"] {
+    background-color: #fef3c7;
+    color: #b45309;
+}
+QLabel#scopeBadge[scope="instance"] {
+    background-color: #cffafe;
+    color: #0e7490;
+}
+QLabel#scopeBadge[scope="type"] {
+    background-color: #ffe4e6;
+    color: #be123c;
 }
 QLabel#pathLabel {
     font-size: 12px;
@@ -2940,6 +3315,43 @@ QLineEdit:focus {
 QLineEdit:disabled {
     background-color: #f9fafb;
     color: #9ca3af;
+}
+QLineEdit#filterEdit {
+    padding: 4px 8px;
+    font-size: 12px;
+}
+QComboBox {
+    background-color: #ffffff;
+    border: 1px solid #d1d5db;
+    border-radius: 8px;
+    padding: 4px 26px 4px 8px;
+    color: #374151;
+    font-size: 12px;
+    font-weight: bold;
+}
+QComboBox:hover {
+    border-color: #94a3b8;
+}
+QComboBox:focus {
+    border-color: #2563eb;
+}
+QComboBox:disabled {
+    background-color: #f9fafb;
+    border-color: #e5e7eb;
+    color: #9ca3af;
+}
+QComboBox::drop-down {
+    background: transparent;
+    border: none;
+    width: 18px;
+}
+QComboBox QAbstractItemView {
+    background-color: #ffffff;
+    border: 1px solid #d1d5db;
+    color: #1f2937;
+    selection-background-color: #dbeafe;
+    selection-color: #1d4ed8;
+    outline: none;
 }
 QPushButton {
     background-color: #ffffff;
@@ -3029,10 +3441,50 @@ QPushButton#segment:checked:disabled {
     border-color: #dbeafe;
     color: #93c5fd;
 }
+QPushButton#option {
+    background-color: #ffffff;
+    border: 1px solid #d1d5db;
+    border-radius: 8px;
+    padding: 8px 12px;
+    color: #475569;
+    font-size: 12px;
+    font-weight: bold;
+}
+QPushButton#option:hover {
+    background-color: #f8fafc;
+}
+QPushButton#option:checked {
+    background-color: #dbeafe;
+    border-color: #bfdbfe;
+    color: #1d4ed8;
+}
+QPushButton#option:checked:hover {
+    background-color: #dbeafe;
+}
+QPushButton#option:disabled {
+    background-color: #f9fafb;
+    border-color: #e5e7eb;
+    color: #9ca3af;
+}
+QPushButton#option:checked:disabled {
+    background-color: #eff6ff;
+    border-color: #dbeafe;
+    color: #93c5fd;
+}
 QPushButton#small {
     padding: 3px 10px;
     font-size: 12px;
     border-radius: 6px;
+}
+QPushButton#sortOrder {
+    padding: 0;
+    border-radius: 8px;
+    font-size: 14px;
+    font-weight: bold;
+    color: #475569;
+}
+QPushButton#sortOrder:hover {
+    background-color: #f8fafc;
 }
 QToolButton#copyButton {
     background-color: transparent;
@@ -3172,6 +3624,9 @@ QLabel#pathStatus[state="error"] {
 QLabel#hint {
     color: #64748b;
 }
+QLabel#engine {
+    color: #64748b;
+}
 QLabel#empty {
     color: #64748b;
 }
@@ -3183,6 +3638,24 @@ QFrame#card {
     background-color: #111827;
     border-color: #1f2937;
 }
+QFrame#card[scope="global"] {
+    border-left: 4px solid #60a5fa;
+}
+QFrame#card[scope="local"] {
+    border-left: 4px solid #34d399;
+}
+QFrame#card[scope="member"] {
+    border-left: 4px solid #a78bfa;
+}
+QFrame#card[scope="class"] {
+    border-left: 4px solid #fbbf24;
+}
+QFrame#card[scope="instance"] {
+    border-left: 4px solid #22d3ee;
+}
+QFrame#card[scope="type"] {
+    border-left: 4px solid #fb7185;
+}
 QLabel#funcName {
     color: #f8fafc;
 }
@@ -3193,6 +3666,30 @@ QLabel#badge {
 QLabel#scopeBadge {
     background-color: #064e3b;
     color: #a7f3d0;
+}
+QLabel#scopeBadge[scope="global"] {
+    background-color: #1e3a8a;
+    color: #bfdbfe;
+}
+QLabel#scopeBadge[scope="local"] {
+    background-color: #064e3b;
+    color: #a7f3d0;
+}
+QLabel#scopeBadge[scope="member"] {
+    background-color: #4c1d95;
+    color: #ddd6fe;
+}
+QLabel#scopeBadge[scope="class"] {
+    background-color: #78350f;
+    color: #fde68a;
+}
+QLabel#scopeBadge[scope="instance"] {
+    background-color: #155e75;
+    color: #a5f3fc;
+}
+QLabel#scopeBadge[scope="type"] {
+    background-color: #881337;
+    color: #fecdd3;
 }
 QLabel#pathLabel {
     color: #94a3b8;
@@ -3216,6 +3713,43 @@ QLineEdit:focus {
 QLineEdit:disabled {
     background-color: #0b1120;
     color: #64748b;
+}
+QLineEdit#filterEdit {
+    padding: 4px 8px;
+    font-size: 12px;
+}
+QComboBox {
+    background-color: #0f172a;
+    border: 1px solid #334155;
+    border-radius: 8px;
+    padding: 4px 26px 4px 8px;
+    color: #e2e8f0;
+    font-size: 12px;
+    font-weight: bold;
+}
+QComboBox:hover {
+    border-color: #60a5fa;
+}
+QComboBox:focus {
+    border-color: #60a5fa;
+}
+QComboBox:disabled {
+    background-color: #111827;
+    border-color: #1f2937;
+    color: #64748b;
+}
+QComboBox::drop-down {
+    background: transparent;
+    border: none;
+    width: 18px;
+}
+QComboBox QAbstractItemView {
+    background-color: #111827;
+    border: 1px solid #334155;
+    color: #e2e8f0;
+    selection-background-color: #1e3a8a;
+    selection-color: #bfdbfe;
+    outline: none;
 }
 QPushButton {
     background-color: #1f2937;
@@ -3298,6 +3832,46 @@ QPushButton#segment:checked:disabled {
     border-color: #1e3a8a;
     color: #93c5fd;
 }
+QPushButton#option {
+    background-color: #111827;
+    border: 1px solid #334155;
+    border-radius: 8px;
+    padding: 8px 12px;
+    color: #94a3b8;
+    font-size: 12px;
+    font-weight: bold;
+}
+QPushButton#option:hover {
+    background-color: #1e293b;
+}
+QPushButton#option:checked {
+    background-color: #1e3a8a;
+    border-color: #1d4ed8;
+    color: #bfdbfe;
+}
+QPushButton#option:checked:hover {
+    background-color: #1e3a8a;
+}
+QPushButton#option:disabled {
+    background-color: #111827;
+    border-color: #1f2937;
+    color: #64748b;
+}
+QPushButton#option:checked:disabled {
+    background-color: #172554;
+    border-color: #1e3a8a;
+    color: #93c5fd;
+}
+QPushButton#sortOrder {
+    padding: 0;
+    border-radius: 8px;
+    font-size: 14px;
+    font-weight: bold;
+    color: #cbd5e1;
+}
+QPushButton#sortOrder:hover {
+    background-color: #1e293b;
+}
 QToolButton#copyButton:hover {
     background-color: #1e293b;
     border-color: #334155;
@@ -3335,6 +3909,7 @@ class SearchWorker(QThread):
         name,
         parent=None,
         mode=SEARCH_MODE_FUNCTION,
+        case_sensitive=True,
     ):
         super().__init__(parent)
         self.root = root
@@ -3344,6 +3919,7 @@ class SearchWorker(QThread):
             if mode == SEARCH_MODE_VARIABLE
             else SEARCH_MODE_FUNCTION
         )
+        self.case_sensitive = bool(case_sensitive)
         self.stop_event = threading.Event()
         self.engine = SearchEngine(self.stop_event, self._emit_progress)
 
@@ -3368,7 +3944,12 @@ class SearchWorker(QThread):
             self.results_ready.emit(batch)
 
         try:
-            for result in self.engine.search(self.root, self.name, self.mode):
+            for result in self.engine.search(
+                self.root,
+                self.name,
+                self.mode,
+                self.case_sensitive,
+            ):
                 if self.stop_event.is_set():
                     break
                 pending.append(result)
@@ -3497,6 +4078,9 @@ class ResultCard(QFrame):
         self.kind = getattr(result, "kind", SEARCH_MODE_FUNCTION)
         self.scope = getattr(result, "scope", "")
         self.setObjectName("card")
+        # 变量卡片用左侧强调条 + 作用域徽标颜色区分全局/局部等作用域。
+        if self.kind == SEARCH_MODE_VARIABLE:
+            self.setProperty("scope", self.scope)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum)
 
         shadow = QGraphicsDropShadowEffect(self)
@@ -3519,6 +4103,8 @@ class ResultCard(QFrame):
         badge.setObjectName("badge")
         self.scope_label = QLabel()
         self.scope_label.setObjectName("scopeBadge")
+        if self.scope:
+            self.scope_label.setProperty("scope", self.scope)
         self.scope_label.setVisible(
             self.kind == SEARCH_MODE_VARIABLE and bool(self.scope)
         )
@@ -3621,7 +4207,14 @@ class ResultCard(QFrame):
         code_layout.addWidget(code)
         layout.addWidget(code_box)
 
-        self.highlighter = CodeHighlighter(code.document(), result.name)
+        name_color = (
+            SCOPE_CODE_COLORS.get(self.scope, DEFAULT_NAME_COLOR)
+            if self.kind == SEARCH_MODE_VARIABLE
+            else DEFAULT_NAME_COLOR
+        )
+        self.highlighter = CodeHighlighter(
+            code.document(), result.name, name_color
+        )
         self.apply_language(lang)
 
     def apply_language(self, lang):
@@ -3652,11 +4245,35 @@ class ResultCard(QFrame):
         self.copy_btn.show_copied()
 
 
+class ArrowComboBox(QComboBox):
+    """带自绘下拉箭头的下拉框；QSS 隐藏原生箭头后仍保持可识别。"""
+
+    def paintEvent(self, event):
+        super().paintEvent(event)
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        color = QColor("#64748b" if self.isEnabled() else "#94a3b8")
+        pen = QPen(
+            color,
+            1.6,
+            Qt.PenStyle.SolidLine,
+            Qt.PenCapStyle.RoundCap,
+            Qt.PenJoinStyle.RoundJoin,
+        )
+        painter.setPen(pen)
+        x = self.width() - 13.0
+        y = self.height() / 2.0
+        painter.drawLine(QPointF(x - 3.0, y - 2.0), QPointF(x, y + 1.0))
+        painter.drawLine(QPointF(x, y + 1.0), QPointF(x + 3.0, y - 2.0))
+        painter.end()
+
+
 class ResultsView(QScrollArea):
     """结果列表：只创建视口附近的卡片，结果再多也不会拖慢界面。
 
-    所有搜索结果都保存在 ``results`` 中，滚动条按估算/实测高度映射到
-    完整结果列表；实际存在的 QWidget 数量始终保持在 10 个左右。
+    ``all_results`` 保存搜索得到的全部结果，``results`` 是当前筛选/排序后
+    实际显示的列表；滚动条按估算/实测高度映射到显示列表，实际存在的
+    QWidget 数量始终保持在 10 个左右。
     """
 
     GAP = 12
@@ -3675,7 +4292,12 @@ class ResultsView(QScrollArea):
 
         self.lang = lang
         self.base_dir = ""
+        self.all_results = []
         self.results = []
+        self.filter_text = ""
+        self.scope_filter = "all"
+        self.sort_key = "default"
+        self.sort_descending = False
         self.heights = []
         self.offsets = [0]
         self.cards = {}
@@ -3731,6 +4353,7 @@ class ResultsView(QScrollArea):
             card.apply_language(lang)
 
     def clear(self):
+        self.all_results = []
         self.results = []
         self.heights = []
         self.offsets = [0]
@@ -3740,20 +4363,62 @@ class ResultsView(QScrollArea):
         self.verticalScrollBar().setValue(0)
         self._sync_empty()
 
+    def set_filter(self, filter_text, scope_filter="all", reset_scroll=True):
+        """设置文本/作用域筛选；内容未变化时直接返回。"""
+        filter_text = (filter_text or "").strip()
+        if scope_filter not in RESULT_SCOPE_FILTERS:
+            scope_filter = "all"
+        if (
+            filter_text == self.filter_text
+            and scope_filter == self.scope_filter
+        ):
+            return
+        self.filter_text = filter_text
+        self.scope_filter = scope_filter
+        self._rebuild_view(reset_scroll=reset_scroll)
+
+    def set_sort(self, sort_key, descending=False, reset_scroll=True):
+        """设置排序键和方向；内容未变化时直接返回。"""
+        if sort_key not in RESULT_SORT_KEYS:
+            sort_key = "default"
+        descending = bool(descending)
+        if sort_key == self.sort_key and descending == self.sort_descending:
+            return
+        self.sort_key = sort_key
+        self.sort_descending = descending
+        self._rebuild_view(reset_scroll=reset_scroll)
+
+    def all_count(self):
+        return len(self.all_results)
+
+    def visible_count(self):
+        return len(self.results)
+
+    def has_active_filter(self):
+        return bool(self.filter_text) or self.scope_filter != "all"
+
     def append_results(self, results, base_dir=None):
         """批量追加结果；只在需要时创建卡片。"""
         if not results:
             return
         if base_dir is not None:
             self.base_dir = base_dir
-        for result in results:
-            self.results.append(result)
-            height = self._estimate_height(result)
-            self.heights.append(height)
-            self.offsets.append(self.offsets[-1] + height + self.GAP)
-        self._sync_empty()
-        self._schedule_layout()
-        self._schedule_refresh()
+        self.all_results.extend(results)
+        if (
+            not self.has_active_filter()
+            and self.sort_key == "default"
+            and not self.sort_descending
+        ):
+            for result in results:
+                self.results.append(result)
+                height = self._estimate_height(result)
+                self.heights.append(height)
+                self.offsets.append(self.offsets[-1] + height + self.GAP)
+            self._sync_empty()
+            self._schedule_layout()
+            self._schedule_refresh()
+            return
+        self._rebuild_view(reset_scroll=False)
 
     def flush_layout(self):
         """搜索结束后立即同步滚动范围。"""
@@ -3763,6 +4428,32 @@ class ResultsView(QScrollArea):
 
     def live_card_count(self):
         return len(self.cards)
+
+    def _rebuild_view(self, reset_scroll=True):
+        """根据 all_results 重新计算可见结果、高度和滚动范围。"""
+        bar = self.verticalScrollBar()
+        previous_value = bar.value()
+        visible = [
+            result
+            for result in self.all_results
+            if result_matches_filter(
+                result, self.filter_text, self.scope_filter
+            )
+        ]
+        self.results = sort_search_results(
+            visible, self.sort_key, self.sort_descending
+        )
+        self.heights = [self._estimate_height(result) for result in self.results]
+        self._recompute_offsets()
+        self._layout_timer.stop()
+        self._clear_cards()
+        self._container_height()
+        if reset_scroll:
+            bar.setValue(0)
+        else:
+            bar.setValue(min(previous_value, bar.maximum()))
+        self._sync_empty()
+        self._schedule_refresh()
 
     # -- 高度与滚动映射 -----------------------------------------------------
 
@@ -3986,6 +4677,19 @@ class MainWindow(QMainWindow):
         )
         if self.search_mode not in SEARCH_MODES:
             self.search_mode = SEARCH_MODE_FUNCTION
+        self.case_sensitive = self.settings.value(
+            "case_sensitive", True, type=bool
+        )
+        self.result_sort = self.settings.value(
+            "result_sort", "default", type=str
+        )
+        if self.result_sort not in RESULT_SORT_KEYS:
+            self.result_sort = "default"
+        self.result_sort_desc = self.settings.value(
+            "result_sort_desc", False, type=bool
+        )
+        self.scope_filter_key = "all"
+        self.searching = False
         self.current_mode = self.search_mode
         self.worker = None
         self.workers = set()
@@ -4012,6 +4716,11 @@ class MainWindow(QMainWindow):
         self._results_timer.setSingleShot(True)
         self._results_timer.setInterval(80)
         self._results_timer.timeout.connect(self._flush_pending_results)
+
+        self._filter_timer = QTimer(self)
+        self._filter_timer.setSingleShot(True)
+        self._filter_timer.setInterval(180)
+        self._filter_timer.timeout.connect(self._apply_result_filters)
 
         self._build_ui()
         self._load_settings()
@@ -4111,20 +4820,47 @@ class MainWindow(QMainWindow):
         search_row.setSpacing(8)
         self.search_edit = QLineEdit()
         self.search_edit.setClearButtonEnabled(True)
+        self.case_btn = QPushButton()
+        self.case_btn.setObjectName("option")
+        self.case_btn.setCheckable(True)
+        self.case_btn.setChecked(self.case_sensitive)
+        self.case_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.case_btn.setMinimumWidth(88)
         self.search_btn = QPushButton()
         self.search_btn.setObjectName("primary")
         self.stop_btn = QPushButton()
         self.stop_btn.setObjectName("stop")
         self.stop_btn.setEnabled(False)
+        for button in (
+            self.case_btn,
+            self.search_btn,
+            self.stop_btn,
+        ):
+            button.setSizePolicy(
+                QSizePolicy.Policy.Minimum,
+                QSizePolicy.Policy.Expanding,
+            )
         search_row.addWidget(self.search_edit, 1)
+        search_row.addWidget(self.case_btn)
         search_row.addWidget(self.search_btn)
         search_row.addWidget(self.stop_btn)
         panel_layout.addLayout(search_row)
 
+        hint_row = QHBoxLayout()
+        hint_row.setSpacing(8)
         self.hint_label = QLabel()
         self.hint_label.setObjectName("hint")
         self.hint_label.setWordWrap(True)
-        panel_layout.addWidget(self.hint_label)
+        self.engine_label = QLabel()
+        self.engine_label.setObjectName("engine")
+        self.engine_label.setAlignment(
+            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignTop
+        )
+        hint_row.addWidget(self.hint_label, 1)
+        hint_row.addWidget(
+            self.engine_label, 0, Qt.AlignmentFlag.AlignTop
+        )
+        panel_layout.addLayout(hint_row)
 
         outer.addWidget(panel)
 
@@ -4160,7 +4896,32 @@ class MainWindow(QMainWindow):
         results_header.addWidget(self.copy_all_btn)
         outer.addLayout(results_header)
 
+        filter_row = QHBoxLayout()
+        filter_row.setSpacing(8)
+        self.filter_edit = QLineEdit()
+        self.filter_edit.setObjectName("filterEdit")
+        self.filter_edit.setClearButtonEnabled(True)
+        self.filter_edit.setFixedHeight(30)
+        self.scope_filter_combo = ArrowComboBox()
+        self.scope_filter_combo.setFixedHeight(30)
+        self.scope_filter_combo.setMinimumWidth(112)
+        self.sort_combo = ArrowComboBox()
+        self.sort_combo.setFixedHeight(30)
+        self.sort_combo.setMinimumWidth(108)
+        self.sort_order_btn = QPushButton()
+        self.sort_order_btn.setObjectName("sortOrder")
+        self.sort_order_btn.setFixedSize(30, 30)
+        self.sort_order_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        filter_row.addWidget(self.filter_edit, 1)
+        filter_row.addWidget(self.scope_filter_combo)
+        filter_row.addWidget(self.sort_combo)
+        filter_row.addWidget(self.sort_order_btn)
+        outer.addLayout(filter_row)
+
         self.results_view = ResultsView(self.lang)
+        self.results_view.set_sort(
+            self.result_sort, self.result_sort_desc, reset_scroll=False
+        )
         outer.addWidget(self.results_view, 1)
         self.results_view.set_empty_visible(True)
 
@@ -4176,6 +4937,13 @@ class MainWindow(QMainWindow):
         self.search_btn.clicked.connect(self.start_search)
         self.stop_btn.clicked.connect(self.stop_search)
         self.search_edit.returnPressed.connect(self.start_search)
+        self.case_btn.toggled.connect(self.set_case_sensitive)
+        self.filter_edit.textChanged.connect(self._schedule_result_filters)
+        self.scope_filter_combo.currentIndexChanged.connect(
+            self._on_scope_filter_changed
+        )
+        self.sort_combo.currentIndexChanged.connect(self._on_sort_changed)
+        self.sort_order_btn.clicked.connect(self._toggle_sort_order)
 
         self.apply_theme()
         self.apply_language()
@@ -4225,6 +4993,7 @@ class MainWindow(QMainWindow):
         self.results_title_label.setText(tr(self.lang, "results_title"))
         self.copy_all_btn.setText(tr(self.lang, "copy_all"))
         self.copy_all_btn.setToolTip(tr(self.lang, "copy_all_tooltip"))
+        self._update_result_controls_texts()
         self.lang_btn.setText("中文" if self.lang == "en" else "EN")
         self.lang_btn.setToolTip(tr(self.lang, "lang_tooltip"))
         self._update_theme_button()
@@ -4233,6 +5002,7 @@ class MainWindow(QMainWindow):
         self._render_status()
         self._render_path_status()
         self.results_view.apply_language(self.lang)
+        self._update_result_controls_enabled()
 
     def set_search_mode(self, mode, persist=True):
         if mode not in SEARCH_MODES:
@@ -4267,6 +5037,176 @@ class MainWindow(QMainWindow):
         self.var_mode_btn.setText(tr(self.lang, "mode_variable"))
         self.func_mode_btn.setToolTip(tr(self.lang, "mode_function_tooltip"))
         self.var_mode_btn.setToolTip(tr(self.lang, "mode_variable_tooltip"))
+        self.case_btn.setText(tr(self.lang, "case_sensitive"))
+        self.case_btn.setToolTip(tr(self.lang, "case_sensitive_tooltip"))
+        self.case_btn.setAccessibleName(
+            tr(self.lang, "case_sensitive_tooltip")
+        )
+
+    @staticmethod
+    def _populate_combo(combo, items, current_key):
+        combo.blockSignals(True)
+        try:
+            combo.clear()
+            for key, label in items:
+                combo.addItem(label, key)
+            index = combo.findData(current_key)
+            combo.setCurrentIndex(index if index >= 0 else 0)
+        finally:
+            combo.blockSignals(False)
+
+    def _update_result_controls_texts(self):
+        self.filter_edit.setPlaceholderText(
+            tr(self.lang, "filter_results_placeholder")
+        )
+        self.filter_edit.setToolTip(
+            tr(self.lang, "filter_results_tooltip")
+        )
+        scope_items = [
+            ("all", tr(self.lang, "scope_filter_all")),
+            ("function", tr(self.lang, "mode_function")),
+            ("global", tr(self.lang, "scope_global")),
+            ("local", tr(self.lang, "scope_local")),
+            ("member", tr(self.lang, "scope_member")),
+            ("class", tr(self.lang, "scope_class")),
+            ("instance", tr(self.lang, "scope_instance")),
+            ("type", tr(self.lang, "scope_type")),
+        ]
+        self._populate_combo(
+            self.scope_filter_combo, scope_items, self.scope_filter_key
+        )
+        sort_items = [
+            ("default", tr(self.lang, "sort_default")),
+            ("name", tr(self.lang, "sort_name")),
+            ("path", tr(self.lang, "sort_path")),
+            ("scope", tr(self.lang, "sort_scope")),
+            ("language", tr(self.lang, "sort_language")),
+        ]
+        self._populate_combo(
+            self.sort_combo, sort_items, self.result_sort
+        )
+        self._update_sort_order_button()
+
+    def _update_sort_order_button(self):
+        self.sort_order_btn.setText(
+            "↓" if self.result_sort_desc else "↑"
+        )
+        tooltip_key = (
+            "sort_order_desc_tooltip"
+            if self.result_sort_desc
+            else "sort_order_asc_tooltip"
+        )
+        tooltip = tr(self.lang, tooltip_key)
+        self.sort_order_btn.setToolTip(tooltip)
+        self.sort_order_btn.setAccessibleName(tooltip)
+
+    def _on_scope_filter_changed(self, _index):
+        key = self.scope_filter_combo.currentData() or "all"
+        if key == self.scope_filter_key:
+            return
+        self.scope_filter_key = key
+        self._apply_result_filters()
+
+    def _schedule_result_filters(self, _text=None):
+        if not self._filter_timer.isActive():
+            self._filter_timer.start()
+
+    def _apply_result_filters(self):
+        self._filter_timer.stop()
+        self.results_view.set_filter(
+            self.filter_edit.text(),
+            self.scope_filter_key,
+            reset_scroll=True,
+        )
+        self._after_result_view_changed()
+
+    def _on_sort_changed(self, _index):
+        key = self.sort_combo.currentData() or "default"
+        if key == self.result_sort:
+            return
+        self.result_sort = key
+        self.settings.setValue("result_sort", key)
+        self._apply_result_sort()
+
+    def _apply_result_sort(self):
+        self.results_view.set_sort(
+            self.result_sort,
+            self.result_sort_desc,
+            reset_scroll=True,
+        )
+        self._after_result_view_changed()
+
+    def _toggle_sort_order(self):
+        self.result_sort_desc = not self.result_sort_desc
+        self.settings.setValue("result_sort_desc", self.result_sort_desc)
+        self._update_sort_order_button()
+        self._apply_result_sort()
+
+    def _reset_result_filters(self):
+        self._filter_timer.stop()
+        self.filter_edit.blockSignals(True)
+        try:
+            self.filter_edit.clear()
+        finally:
+            self.filter_edit.blockSignals(False)
+        self.scope_filter_key = "all"
+        self.scope_filter_combo.blockSignals(True)
+        try:
+            index = self.scope_filter_combo.findData("all")
+            self.scope_filter_combo.setCurrentIndex(max(0, index))
+        finally:
+            self.scope_filter_combo.blockSignals(False)
+        self.results_view.set_filter("", "all", reset_scroll=False)
+
+    def _after_result_view_changed(self):
+        self._update_count_label()
+        self._update_copy_all_enabled()
+        self._update_result_controls_enabled()
+        self._refresh_result_view_state()
+
+    def _update_copy_all_enabled(self):
+        self.copy_all_btn.setEnabled(self.results_view.visible_count() > 0)
+
+    def _update_result_controls_enabled(self):
+        enabled = self.result_count > 0
+        self.filter_edit.setEnabled(enabled)
+        self.scope_filter_combo.setEnabled(enabled)
+        self.sort_combo.setEnabled(enabled)
+        self.sort_order_btn.setEnabled(enabled)
+
+    def _refresh_result_view_state(self):
+        if self.searching:
+            self.results_view.set_empty_visible(False)
+            return
+        total = self.result_count
+        visible = self.results_view.visible_count()
+        if not self.has_searched:
+            self.empty_state = "initial"
+            self._update_empty_label()
+            self.results_view.set_empty_visible(True)
+        elif (
+            total > 0
+            and visible == 0
+            and self.results_view.has_active_filter()
+        ):
+            self.empty_state = "filtered"
+            self._update_empty_label()
+            self.results_view.set_empty_visible(True)
+        elif visible > 0:
+            self.results_view.set_empty_visible(False)
+        else:
+            self._update_empty_label()
+            self.results_view.set_empty_visible(True)
+
+    def set_case_sensitive(self, enabled):
+        enabled = bool(enabled)
+        self.case_sensitive = enabled
+        if self.case_btn.isChecked() != enabled:
+            self.case_btn.setChecked(enabled)
+        self.settings.setValue("case_sensitive", enabled)
+        self._update_search_mode_texts()
+        self._update_hint()
+        self.search_edit.setFocus()
 
     def _update_hint(self):
         hint_key = (
@@ -4275,11 +5215,22 @@ class MainWindow(QMainWindow):
             else "hint"
         )
         hint = tr(self.lang, hint_key)
-        engine = SearchEngine.backend_name()
-        if engine != "ripgrep":
-            hint += "\n" + tr(self.lang, "hint_install_rg", engine=engine)
+        if not self.case_sensitive:
+            hint += "\n" + tr(self.lang, "hint_case_insensitive")
         if self.hint_label.text() != hint:
             self.hint_label.setText(hint)
+        self._update_engine_label()
+
+    def _update_engine_label(self):
+        engine = SearchEngine.backend_name()
+        text = tr(self.lang, "engine_label", engine=engine)
+        if self.engine_label.text() != text:
+            self.engine_label.setText(text)
+        if engine != "ripgrep":
+            tooltip = tr(self.lang, "engine_tooltip_install")
+        else:
+            tooltip = ""
+        self.engine_label.setToolTip(tooltip)
 
     def _load_settings(self):
         path = self.settings.value("code_path", "", type=str) or ""
@@ -4332,16 +5283,28 @@ class MainWindow(QMainWindow):
         self._set_label_state(self.path_status, error)
 
     def _update_count_label(self):
-        text = (
-            results_count_text(self.lang, self.result_count)
-            if self.has_searched
-            else ""
-        )
+        if not self.has_searched:
+            text = ""
+        elif self.results_view.has_active_filter():
+            text = results_count_filtered_text(
+                self.lang,
+                self.results_view.visible_count(),
+                self.result_count,
+            )
+        else:
+            text = results_count_text(self.lang, self.result_count)
         if self.count_label.text() != text:
             self.count_label.setText(text)
 
     def _update_empty_label(self):
-        variable = self.search_mode == SEARCH_MODE_VARIABLE
+        # 搜索完成后的空状态沿用上一次搜索的类型，切换函数/变量只影响
+        # 下一次搜索，不应立刻改写“未找到函数/变量定义”的提示。
+        mode = (
+            self.current_mode
+            if self.has_searched and self.empty_state == "no_results"
+            else self.search_mode
+        )
+        variable = mode == SEARCH_MODE_VARIABLE
         key = {
             "initial": (
                 "empty_initial_variable" if variable else "empty_initial"
@@ -4352,6 +5315,7 @@ class MainWindow(QMainWindow):
                 else "empty_no_results"
             ),
             "failed": "empty_failed",
+            "filtered": "empty_filtered",
         }.get(self.empty_state, "empty_initial")
         self.results_view.set_empty_text(tr(self.lang, key))
 
@@ -4396,10 +5360,12 @@ class MainWindow(QMainWindow):
 
     def _set_searching(self, active):
         # 窗口操作不因搜索而禁用，新搜索会取消旧搜索
+        self.searching = bool(active)
         self.stop_btn.setEnabled(active)
         self.progress.setVisible(active)
         self.func_mode_btn.setEnabled(not active)
         self.var_mode_btn.setEnabled(not active)
+        self.case_btn.setEnabled(not active)
 
     # -- 目录配置 -----------------------------------------------------------
 
@@ -4441,6 +5407,7 @@ class MainWindow(QMainWindow):
                 error=True,
             )
             return
+        case_sensitive = self.case_sensitive
         name_pattern = (
             r"[A-Za-z_$][A-Za-z0-9_$]*"
             if variable
@@ -4484,15 +5451,18 @@ class MainWindow(QMainWindow):
         self.has_searched = True
         self.empty_state = "no_results"
         self._clear_results()
+        self._reset_result_filters()
         self._update_count_label()
         self.results_view.set_empty_visible(False)
         self._set_searching(True)
-        self._set_status(
-            "searching", name=name, engine=SearchEngine.backend_name()
-        )
+        self._set_status("searching", name=name)
 
         worker = SearchWorker(
-            self.base_dir, name, self, self.current_mode
+            self.base_dir,
+            name,
+            self,
+            self.current_mode,
+            case_sensitive,
         )
         self.worker = worker
         self.workers.add(worker)
@@ -4528,9 +5498,11 @@ class MainWindow(QMainWindow):
         self.results_view.clear()
         self.result_count = 0
         self.copy_all_btn.setEnabled(False)
+        self._update_result_controls_enabled()
 
     def copy_all_results(self):
-        results = list(self.results_view.results) + self._pending_results
+        self._flush_pending_results()
+        results = list(self.results_view.results)
         if not results:
             return
         separator = "\n\n" + "-" * 60 + "\n\n"
@@ -4545,9 +5517,9 @@ class MainWindow(QMainWindow):
             return
         self._pending_results.extend(results)
         self.result_count = (
-            len(self.results_view.results) + len(self._pending_results)
+            self.results_view.all_count() + len(self._pending_results)
         )
-        self.copy_all_btn.setEnabled(self.result_count > 0)
+        self._update_result_controls_enabled()
         if not self._results_timer.isActive():
             self._results_timer.start()
         self._schedule_stats()
@@ -4558,6 +5530,7 @@ class MainWindow(QMainWindow):
         batch = self._pending_results
         self._pending_results = []
         self.results_view.append_results(batch, self.search_base_dir)
+        self._after_result_view_changed()
 
     def _on_progress(self, scanned, generation):
         if generation != self.search_generation:
@@ -4573,8 +5546,8 @@ class MainWindow(QMainWindow):
         self._stop_requested = False
         self._last_scanned = scanned
         self._flush_pending_results()
-        self.result_count = len(self.results_view.results)
-        self.copy_all_btn.setEnabled(self.result_count > 0)
+        self.result_count = self.results_view.all_count()
+        self._update_copy_all_enabled()
         self.results_view.flush_layout()
         self._set_searching(False)
         key = "stopped_summary" if stopped else "finished_summary"
@@ -4588,10 +5561,8 @@ class MainWindow(QMainWindow):
         self._update_count_label()
         if self.result_count == 0:
             self.empty_state = "no_results"
-            self._update_empty_label()
-            self.results_view.set_empty_visible(True)
-        else:
-            self.results_view.set_empty_visible(False)
+        self._update_empty_label()
+        self._refresh_result_view_state()
 
     def _on_failed(self, message, generation):
         if generation != self.search_generation:
@@ -4600,17 +5571,15 @@ class MainWindow(QMainWindow):
         self._results_timer.stop()
         self._stop_requested = False
         self._flush_pending_results()
-        self.result_count = len(self.results_view.results)
-        self.copy_all_btn.setEnabled(self.result_count > 0)
+        self.result_count = self.results_view.all_count()
+        self._update_copy_all_enabled()
         self.results_view.flush_layout()
         self._set_searching(False)
         self._set_status("search_failed", message=message, error=True)
         if self.result_count == 0:
             self.empty_state = "failed"
-            self._update_empty_label()
-            self.results_view.set_empty_visible(True)
-        else:
-            self.results_view.set_empty_visible(False)
+        self._update_empty_label()
+        self._refresh_result_view_state()
 
     def _on_worker_done(self):
         worker = self.sender()

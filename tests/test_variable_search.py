@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import os
+import shutil
 import sys
 import tempfile
 import threading
@@ -450,6 +451,241 @@ class SearchEngineVariableTests(unittest.TestCase):
                         for result in results
                     )
                 )
+
+
+class SearchEngineCaseSensitivityTests(unittest.TestCase):
+    def _search(self, root, name, mode, case_sensitive=True):
+        with mock.patch.dict(os.environ, {"FUNC_FINDER_BACKEND": "python"}):
+            engine = func_finder.SearchEngine(threading.Event())
+            return list(
+                engine.search(
+                    str(root),
+                    name,
+                    mode,
+                    case_sensitive=case_sensitive,
+                )
+            )
+
+    def test_plain_search_is_case_sensitive_by_default(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / "a.c").write_text(
+                "static int MAX_SIZE = 10;\n",
+                encoding="utf-8",
+            )
+            self.assertEqual(
+                self._search(
+                    root, "max_size", func_finder.SEARCH_MODE_VARIABLE
+                ),
+                [],
+            )
+            found = self._search(
+                root,
+                "max_size",
+                func_finder.SEARCH_MODE_VARIABLE,
+                case_sensitive=False,
+            )
+            self.assertEqual(
+                [(result.name, result.scope) for result in found],
+                [("MAX_SIZE", "global")],
+            )
+
+    def test_case_insensitive_function_search(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / "a.py").write_text(
+                "def Parse_Config():\n"
+                "    return 1\n\n"
+                "def parse_config():\n"
+                "    return 2\n",
+                encoding="utf-8",
+            )
+            exact = self._search(
+                root, "parse_config", func_finder.SEARCH_MODE_FUNCTION
+            )
+            self.assertEqual([result.name for result in exact], ["parse_config"])
+            insensitive = self._search(
+                root,
+                "parse_config",
+                func_finder.SEARCH_MODE_FUNCTION,
+                case_sensitive=False,
+            )
+            self.assertEqual(
+                sorted(result.name for result in insensitive),
+                ["Parse_Config", "parse_config"],
+            )
+
+    def test_backend_name_is_available(self):
+        self.assertIn(
+            func_finder.SearchEngine.backend_name(),
+            ("ripgrep", "grep", "Python"),
+        )
+
+    @unittest.skipUnless(
+        os.name != "nt" and shutil.which("grep"),
+        "grep is not available",
+    )
+    def test_case_insensitive_grep_backend_keeps_actual_spelling(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / "a.c").write_text(
+                "static int MAX_SIZE = 10;\n",
+                encoding="utf-8",
+            )
+            with mock.patch.dict(
+                os.environ, {"FUNC_FINDER_BACKEND": "grep"}
+            ):
+                engine = func_finder.SearchEngine(threading.Event())
+                found = list(
+                    engine.search(
+                        str(root),
+                        "max_size",
+                        func_finder.SEARCH_MODE_VARIABLE,
+                        case_sensitive=False,
+                    )
+                )
+            self.assertEqual(
+                [(result.name, result.scope) for result in found],
+                [("MAX_SIZE", "global")],
+            )
+
+
+class ResultFilterSortTests(unittest.TestCase):
+    @staticmethod
+    def _result(
+        name,
+        path,
+        scope="",
+        kind=func_finder.SEARCH_MODE_VARIABLE,
+        language="Python",
+        start_line=1,
+        signature="",
+    ):
+        return func_finder.SearchResult(
+            name=name,
+            path=path,
+            start_line=start_line,
+            end_line=start_line,
+            signature=signature,
+            implementation=signature,
+            language=language,
+            kind=kind,
+            scope=scope,
+        )
+
+    def setUp(self):
+        self.results = [
+            self._result(
+                "beta", "/src/b.py", "local", start_line=2,
+                signature="beta = 2",
+            ),
+            self._result(
+                "Alpha", "/src/a.py", "global", language="C/C++",
+                start_line=3, signature="int Alpha = 3;",
+            ),
+            self._result(
+                "Gamma", "/lib/c.py", kind=func_finder.SEARCH_MODE_FUNCTION,
+                language="Rust", start_line=1,
+                signature="fn Gamma()",
+            ),
+            self._result(
+                "delta", "/src/a.py", "member", start_line=1,
+                signature="delta = 1",
+            ),
+        ]
+
+    def test_filtered_count_text_pluralization(self):
+        self.assertEqual(
+            func_finder.results_count_filtered_text("en", 1, 1),
+            "1 / 1 result",
+        )
+        self.assertEqual(
+            func_finder.results_count_filtered_text("en", 2, 3),
+            "2 / 3 results",
+        )
+        self.assertEqual(
+            func_finder.results_count_filtered_text("zh", 2, 3),
+            "2 / 3 个结果",
+        )
+
+    def test_text_filter_is_case_insensitive_and_uses_all_terms(self):
+        matches = [
+            result.name
+            for result in self.results
+            if func_finder.result_matches_filter(result, "SRC Alpha")
+        ]
+        self.assertEqual(matches, ["Alpha"])
+        self.assertEqual(
+            [
+                result.name
+                for result in self.results
+                if func_finder.result_matches_filter(result, "rust")
+            ],
+            ["Gamma"],
+        )
+        self.assertEqual(
+            len(
+                [
+                    result
+                    for result in self.results
+                    if func_finder.result_matches_filter(result, "")
+                ]
+            ),
+            len(self.results),
+        )
+
+    def test_scope_filter(self):
+        def names(scope):
+            return [
+                result.name
+                for result in self.results
+                if func_finder.result_matches_filter(result, "", scope)
+            ]
+
+        self.assertEqual(names("all"), ["beta", "Alpha", "Gamma", "delta"])
+        self.assertEqual(names("function"), ["Gamma"])
+        self.assertEqual(names("global"), ["Alpha"])
+        self.assertEqual(names("local"), ["beta"])
+        self.assertEqual(names("member"), ["delta"])
+        self.assertEqual(names("class"), [])
+
+    def test_sort_keys_and_direction(self):
+        def names(sort_key, descending=False):
+            return [
+                result.name
+                for result in func_finder.sort_search_results(
+                    self.results, sort_key, descending
+                )
+            ]
+
+        self.assertEqual(
+            names("default"), ["beta", "Alpha", "Gamma", "delta"]
+        )
+        self.assertEqual(
+            names("default", True), ["delta", "Gamma", "Alpha", "beta"]
+        )
+        self.assertEqual(
+            names("name"), ["Alpha", "beta", "delta", "Gamma"]
+        )
+        self.assertEqual(
+            names("name", True), ["Gamma", "delta", "beta", "Alpha"]
+        )
+        self.assertEqual(
+            names("path"), ["Gamma", "delta", "Alpha", "beta"]
+        )
+        self.assertEqual(
+            names("scope"), ["Gamma", "Alpha", "beta", "delta"]
+        )
+        self.assertEqual(
+            names("language"), ["Alpha", "beta", "delta", "Gamma"]
+        )
+
+
+class ScopeColorTests(unittest.TestCase):
+    def test_all_scopes_have_distinct_code_colors(self):
+        scopes = ("global", "local", "member", "class", "instance", "type")
+        colors = [func_finder.SCOPE_CODE_COLORS[scope] for scope in scopes]
+        self.assertEqual(len(colors), len(set(colors)))
 
 
 if __name__ == "__main__":
