@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""通用函数与变量定义查询工具（PySide6 / Qt 6）
+"""通用函数、变量与宏定义查询工具（PySide6 / Qt 6）
 
 功能：
     1. 配置任意代码目录（自动保存，跨平台）；
     2. 在「函数」模式下输入函数名，搜索其定义与完整实现；
        在「变量」模式下输入变量名，搜索变量/常量的声明与初始值；
+       在「宏」模式下输入宏名，搜索 #define / macro_rules! 宏定义；
        可用「区分大小写」开关控制是否忽略大小写；
     3. 结果以卡片形式展示签名、来源、行号及完整代码，代码带语法高亮；
        变量结果用不同颜色区分全局/局部/成员等作用域；
@@ -101,10 +102,17 @@ except ImportError as exc:  # pragma: no cover - 仅在缺少依赖时触发
     )
 
 APP_NAME = "FuncFinder"
-__version__ = "0.3.0"
+__version__ = "0.4.0"
 SEARCH_MODE_FUNCTION = "function"
 SEARCH_MODE_VARIABLE = "variable"
-SEARCH_MODES = (SEARCH_MODE_FUNCTION, SEARCH_MODE_VARIABLE)
+SEARCH_MODE_MACRO = "macro"
+SEARCH_MODES = (
+    SEARCH_MODE_FUNCTION,
+    SEARCH_MODE_VARIABLE,
+    SEARCH_MODE_MACRO,
+)
+# 支持宏定义的语言；#define 用于 C 风格语言，macro_rules! 用于 Rust。
+MACRO_LANGUAGES = {"C/C++", "Objective-C", "C#", "Rust"}
 # GNOME Wayland 用 setDesktopFileName() 的值匹配 .desktop 文件名，因此这里
 # 保持 "func-finder"（不带 .desktop 后缀）。
 DESKTOP_FILE_NAME = "func-finder"
@@ -114,13 +122,15 @@ DESKTOP_ICON_NAME = DESKTOP_FILE_NAME
 # 是 APP_NAME；StartupWMClass 必须与它一致。
 DESKTOP_STARTUP_WM_CLASS = APP_NAME
 
-DESKTOP_COMMENT = "Search function and variable definitions"
-DESKTOP_COMMENT_ZH = "搜索代码中的函数与变量定义"
-DESKTOP_GENERIC_NAME = "Function & Variable Finder"
-DESKTOP_GENERIC_NAME_ZH = "函数与变量查找器"
+DESKTOP_COMMENT = "Search function, variable, and macro definitions"
+DESKTOP_COMMENT_ZH = "搜索代码中的函数、变量与宏定义"
+DESKTOP_GENERIC_NAME = "Function, Variable & Macro Finder"
+DESKTOP_GENERIC_NAME_ZH = "函数、变量与宏查找器"
 DESKTOP_CATEGORIES = "Development;"
-DESKTOP_KEYWORDS = "function;variable;constant;search;code;symbol;grep;ripgrep;"
-DESKTOP_KEYWORDS_ZH = "函数;变量;常量;搜索;代码;符号;"
+DESKTOP_KEYWORDS = (
+    "function;variable;constant;macro;define;search;code;symbol;grep;ripgrep;"
+)
+DESKTOP_KEYWORDS_ZH = "函数;变量;常量;宏;搜索;代码;符号;"
 
 
 def _resource_path(*parts):
@@ -517,12 +527,16 @@ _NUMBER_RE = QRegularExpression(r"\b(?:0[xX][0-9a-fA-F]+|\d+(?:\.\d+)?)\b")
 _STRING_COMMENT_RE = QRegularExpression(
     r'("(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])*\'|//[^\n]*|#[^\n]*)'
 )
+# 宏结果里的 #define/# 运算符不是注释；这个变体只识别字符串和 // 注释。
+_STRING_COMMENT_NO_HASH_RE = QRegularExpression(
+    r'("(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])*\'|//[^\n]*)'
+)
 
 TRANSLATIONS = {
     "zh": {
-        "app_title": "函数与变量定义查询",
-        "title": "函数与变量定义查询",
-        "subtitle": "在任意代码目录中搜索函数、变量与常量的定义",
+        "app_title": "函数、变量与宏定义查询",
+        "title": "函数、变量与宏定义查询",
+        "subtitle": "在任意代码目录中搜索函数、变量、常量与宏的定义",
         "code_dir": "代码目录",
         "path_placeholder": "选择任意代码目录，例如 /home/user/project",
         "browse": "选择目录",
@@ -535,12 +549,16 @@ TRANSLATIONS = {
         "path_missing_error": "目录不存在：{path}",
         "mode_function": "函数",
         "mode_variable": "变量",
+        "mode_macro": "宏",
         "mode_function_tooltip": "搜索函数定义与完整实现",
         "mode_variable_tooltip": "搜索变量、常量的定义与初始值",
+        "mode_macro_tooltip": "搜索 #define 与 macro_rules! 宏定义",
         "function_name": "函数名称",
         "variable_name": "变量名称",
+        "macro_name": "宏名称",
         "search_placeholder": "例如：i2c_transfer、parse_config、main",
         "variable_placeholder": "例如：MAX_BUFFER_SIZE、config、timeout",
+        "macro_placeholder": "例如：MAX_BUFFER_SIZE、I2C_TRANSFER、MIN",
         "case_sensitive": "区分大小写",
         "case_sensitive_tooltip": "区分大小写；关闭后 A 和 a 视为相同",
         "search": "搜索",
@@ -551,6 +569,10 @@ TRANSLATIONS = {
         ),
         "variable_hint": (
             "支持全局/局部变量、常量以及结构体/类字段，覆盖与函数模式相同的语言"
+        ),
+        "macro_hint": (
+            "支持 C/C++/Objective-C 的 #define（对象宏、函数宏和多行宏），"
+            "以及 C# #define 和 Rust macro_rules!"
         ),
         "hint_case_insensitive": "不区分大小写：A 与 a 视为相同。",
         "engine_label": "引擎：{engine}",
@@ -595,6 +617,14 @@ TRANSLATIONS = {
             "未找到变量定义\n"
             "可尝试其他变量名，或确认代码目录和文件扩展名是否受支持"
         ),
+        "empty_initial_macro": (
+            "配置代码目录，输入宏名开始搜索\n"
+            "支持 #define 对象宏、函数宏、多行宏以及 Rust macro_rules!"
+        ),
+        "empty_no_results_macro": (
+            "未找到宏定义\n"
+            "可尝试其他宏名，或确认代码目录和文件扩展名是否受支持"
+        ),
         "empty_failed": "搜索出错，请检查代码目录是否可读",
         "theme_dark": "深色模式",
         "theme_light": "浅色模式",
@@ -608,11 +638,16 @@ TRANSLATIONS = {
         "error_invalid_variable_name": (
             "变量名不合法：只能包含字母、数字、下划线、$，且不能以数字开头。"
         ),
+        "error_empty_macro_name": "请输入要查询的宏名。",
+        "error_invalid_macro_name": (
+            "宏名不合法：只能包含字母、数字、下划线、$，且不能以数字开头。"
+        ),
         "error_no_dir": "请先配置有效的代码目录。",
         "searching": "正在搜索 “{name}” ...",
         "stopping": "正在停止搜索 “{name}” ...",
         "kind_function": "函数",
         "kind_variable": "变量",
+        "kind_macro": "宏",
         "searching_progress": (
             "正在搜索 “{name}” ... 已扫描 {scanned} 个候选，找到 {count} 个{kind}"
         ),
@@ -628,6 +663,7 @@ TRANSLATIONS = {
         "lines_range": "第 {start} - {end} 行",
         "implementation": "完整实现",
         "variable_definition": "变量定义",
+        "macro_definition": "宏定义",
         "scope_global": "全局变量",
         "scope_local": "局部变量",
         "scope_member": "成员变量",
@@ -638,12 +674,17 @@ TRANSLATIONS = {
         "copy_signature_tooltip": "复制函数声明",
         "copy_variable_tooltip": "复制该变量的定义代码",
         "copy_variable_signature_tooltip": "复制变量声明",
+        "copy_macro_tooltip": "复制该宏的完整定义代码",
+        "copy_macro_signature_tooltip": "复制宏声明",
         "copied": "已复制",
     },
     "en": {
-        "app_title": "Function & Variable Finder",
-        "title": "Function & Variable Finder",
-        "subtitle": "Search function, variable, and constant definitions in any code directory",
+        "app_title": "Function, Variable & Macro Finder",
+        "title": "Function, Variable & Macro Finder",
+        "subtitle": (
+            "Search function, variable, constant, and macro definitions "
+            "in any code directory"
+        ),
         "code_dir": "Code directory",
         "path_placeholder": "Choose any code directory, e.g. /home/user/project",
         "browse": "Browse...",
@@ -656,12 +697,16 @@ TRANSLATIONS = {
         "path_missing_error": "Directory does not exist: {path}",
         "mode_function": "Function",
         "mode_variable": "Variable",
+        "mode_macro": "Macro",
         "mode_function_tooltip": "Search function definitions and implementations",
         "mode_variable_tooltip": "Search variable and constant definitions",
+        "mode_macro_tooltip": "Search #define and macro_rules! definitions",
         "function_name": "Function name",
         "variable_name": "Variable name",
+        "macro_name": "Macro name",
         "search_placeholder": "e.g. i2c_transfer, parse_config, main",
         "variable_placeholder": "e.g. MAX_BUFFER_SIZE, config, timeout",
+        "macro_placeholder": "e.g. MAX_BUFFER_SIZE, I2C_TRANSFER, MIN",
         "case_sensitive": "Match case",
         "case_sensitive_tooltip": (
             "Match case; when off, A and a are treated the same"
@@ -675,6 +720,10 @@ TRANSLATIONS = {
         "variable_hint": (
             "Supports global/local variables, constants, and struct/class fields "
             "across the same languages as function search."
+        ),
+        "macro_hint": (
+            "Supports C/C++/Objective-C #define macros (object-like, "
+            "function-like, and multi-line), C# #define, and Rust macro_rules!"
         ),
         "hint_case_insensitive": (
             "Case-insensitive: A and a are treated the same."
@@ -727,6 +776,15 @@ TRANSLATIONS = {
             "No variable definition found\n"
             "Try another name, or check the code directory and supported file extensions"
         ),
+        "empty_initial_macro": (
+            "Configure a code directory and enter a macro name to start\n"
+            "Supports #define object-like/function-like/multi-line macros "
+            "and Rust macro_rules!"
+        ),
+        "empty_no_results_macro": (
+            "No macro definition found\n"
+            "Try another name, or check the code directory and supported file extensions"
+        ),
         "empty_failed": "Search failed. Check that the code directory is readable.",
         "theme_dark": "Dark mode",
         "theme_light": "Light mode",
@@ -742,11 +800,17 @@ TRANSLATIONS = {
             "Invalid variable name: use letters, digits, underscores, or $, "
             "and do not start with a digit."
         ),
+        "error_empty_macro_name": "Please enter a macro name.",
+        "error_invalid_macro_name": (
+            "Invalid macro name: use letters, digits, underscores, or $, "
+            "and do not start with a digit."
+        ),
         "error_no_dir": "Configure a valid code directory first.",
         "searching": "Searching for “{name}” ...",
         "stopping": "Stopping “{name}” ...",
         "kind_function": "function",
         "kind_variable": "variable",
+        "kind_macro": "macro",
         "searching_progress": (
             "Searching “{name}” ... scanned {scanned} candidates, "
             "definitions found: {count}"
@@ -765,6 +829,7 @@ TRANSLATIONS = {
         "lines_range": "Lines {start} - {end}",
         "implementation": "Implementation",
         "variable_definition": "Variable definition",
+        "macro_definition": "Macro definition",
         "scope_global": "Global variable",
         "scope_local": "Local variable",
         "scope_member": "Member",
@@ -775,6 +840,8 @@ TRANSLATIONS = {
         "copy_signature_tooltip": "Copy function declaration",
         "copy_variable_tooltip": "Copy the variable's definition code",
         "copy_variable_signature_tooltip": "Copy variable declaration",
+        "copy_macro_tooltip": "Copy the macro's full definition code",
+        "copy_macro_signature_tooltip": "Copy macro declaration",
         "copied": "Copied",
     },
 }
@@ -817,7 +884,7 @@ class SearchResult:
     signature: str
     implementation: str
     language: str
-    # "function" 或 "variable"；默认值保证旧调用方式仍然可用。
+    # "function"、"variable" 或 "macro"；默认值保证旧调用方式仍然可用。
     kind: str = SEARCH_MODE_FUNCTION
     # 变量所在作用域：global / local / member / class / instance / type。
     scope: str = ""
@@ -840,6 +907,7 @@ RESULT_SORT_KEYS = ("default", "name", "path", "scope", "language")
 RESULT_SCOPE_FILTERS = (
     "all",
     "function",
+    "macro",
     "global",
     "local",
     "member",
@@ -861,6 +929,9 @@ def result_matches_filter(result, filter_text, scope_filter="all"):
     """判断结果是否匹配文本筛选和作用域筛选（文本按空格分隔取 AND）。"""
     if scope_filter == "function":
         if result.kind != SEARCH_MODE_FUNCTION:
+            return False
+    elif scope_filter == "macro":
+        if result.kind != SEARCH_MODE_MACRO:
             return False
     elif scope_filter != "all":
         if result.kind != SEARCH_MODE_VARIABLE or result.scope != scope_filter:
@@ -908,7 +979,7 @@ def sort_search_results(results, sort_key="default", descending=False):
         def key(result):
             rank = (
                 -1
-                if result.kind == SEARCH_MODE_FUNCTION
+                if result.kind != SEARCH_MODE_VARIABLE
                 else _SCOPE_SORT_RANK.get(result.scope, 99)
             )
             return (
@@ -1407,6 +1478,114 @@ def extract_function(lines, line_idx, name, language):
     if language == "Python":
         return extract_python_function(lines, line_idx, name)
     return extract_brace_function(lines, line_idx, name, language)
+
+
+# ---------------------------------------------------------------------------
+# 宏定义解析
+# ---------------------------------------------------------------------------
+
+
+def _macro_directive_match(line, name, language):
+    """匹配 #define NAME 或 macro_rules! NAME 的开头。"""
+    word = _name_regex(name) + r"(?![A-Za-z0-9_$])"
+    if language in ("C/C++", "Objective-C", "C#"):
+        return re.match(r"^[ \t]*#[ \t]*define[ \t]+" + word, line)
+    if language == "Rust":
+        return re.match(r"^[ \t]*macro_rules![ \t]*" + word, line)
+    return None
+
+
+def _rust_macro_body(text, name):
+    """返回 Rust 宏体结束下标（含闭合符号）；无法定位时返回 -1。"""
+    head = re.match(
+        r"[ \t]*macro_rules![ \t]*" + _name_regex(name)
+        + r"(?![A-Za-z0-9_$])",
+        text,
+    )
+    if head is None:
+        return -1
+    idx = head.end()
+    length = len(text)
+    while idx < length:
+        char = text[idx]
+        if char in " \t\r\n\\":
+            idx += 1
+        elif text.startswith("//", idx):
+            newline = text.find("\n", idx)
+            if newline < 0:
+                return -1
+            idx = newline + 1
+        elif text.startswith("/*", idx):
+            end = text.find("*/", idx + 2)
+            if end < 0:
+                return -1
+            idx = end + 2
+        else:
+            break
+    if idx >= length or text[idx] not in "({[":
+        return -1
+    opener = text[idx]
+    closer = {"(": ")", "[": "]", "{": "}"}[opener]
+    return _matching_pair(text, idx, opener, closer)
+
+
+def extract_macro(lines, line_idx, name, language):
+    """提取 #define / macro_rules! 宏定义及其完整实现。"""
+    if language not in MACRO_LANGUAGES:
+        return None
+    if _macro_directive_match(lines[line_idx], name, language) is None:
+        return None
+    if _in_block_comment(lines, line_idx):
+        return None
+
+    if language == "Rust":
+        end_idx = min(len(lines), line_idx + MAX_CONTEXT_LINES)
+        text = "".join(lines[line_idx:end_idx])
+        close_idx = _rust_macro_body(text, name)
+        if close_idx < 0:
+            return None
+        implementation = text[: close_idx + 1].strip()
+        if not implementation:
+            return None
+        return (
+            "macro_rules! " + name,
+            implementation,
+            line_idx + 1,
+            line_idx + 1 + implementation.count("\n"),
+        )
+
+    # C/C++/Objective-C 的宏体可以用反斜杠跨行；C# 的 #define 只有一行。
+    end_idx = line_idx
+    while (
+        language != "C#"
+        and end_idx + 1 < len(lines)
+        and end_idx - line_idx < MAX_CONTEXT_LINES
+        and lines[end_idx].rstrip("\r\n").rstrip().endswith("\\")
+    ):
+        end_idx += 1
+
+    implementation = "".join(lines[line_idx : end_idx + 1]).strip()
+    if not implementation:
+        return None
+
+    signature = "#define " + name
+    directive = re.match(
+        r"#[ \t]*define[ \t]+" + _name_regex(name) + r"(\()?",
+        implementation,
+    )
+    if directive is not None and directive.group(1):
+        open_idx = directive.end(1) - 1
+        close_idx = _matching_paren(implementation, open_idx)
+        if close_idx >= 0:
+            params = implementation[open_idx : close_idx + 1]
+            signature = " ".join(("#define " + name + params).split())
+
+    return (
+        signature,
+        implementation,
+        line_idx + 1,
+        line_idx + 1 + implementation.count("\n"),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -2655,6 +2834,15 @@ def _build_variable_pattern(name):
     )
 
 
+def _build_macro_pattern(name):
+    """构造宏定义候选行；最终由 extract_macro() 按语言确认。"""
+    word = _name_regex(name)
+    return (
+        r"^[ \t]*#[ \t]*define[ \t]+" + word
+        + r"|^[ \t]*macro_rules![ \t]*" + word
+    )
+
+
 _BACKEND_LABELS = {"rg": "ripgrep", "grep": "grep", "python": "Python"}
 
 
@@ -2697,6 +2885,16 @@ def _grep_variable_pattern(name):
     return start + escaped + end
 
 
+def _grep_macro_pattern(name):
+    """grep 后端的宏定义候选匹配。"""
+    escaped = _escape_name(name)
+    end = r"([^[:alnum:]_$]|$)"
+    return (
+        r"^[[:space:]]*#[[:space:]]*define[[:space:]]+" + escaped + end
+        + r"|^[[:space:]]*macro_rules![[:space:]]*" + escaped + end
+    )
+
+
 class SearchEngine:
     """与界面解耦的搜索实现，便于单独测试。"""
 
@@ -2723,9 +2921,7 @@ class SearchEngine:
         case_sensitive=True,
     ):
         mode = (
-            SEARCH_MODE_VARIABLE
-            if mode == SEARCH_MODE_VARIABLE
-            else SEARCH_MODE_FUNCTION
+            mode if mode in SEARCH_MODES else SEARCH_MODE_FUNCTION
         )
         case_sensitive = bool(case_sensitive)
         if case_sensitive:
@@ -2749,6 +2945,8 @@ class SearchEngine:
             language = LANGUAGE_BY_SUFFIX.get(suffix)
             if not language:
                 continue
+            if mode == SEARCH_MODE_MACRO and language not in MACRO_LANGUAGES:
+                continue
             lines = cache.get(path)
             index = lineno - 1
             if index < 0 or index >= len(lines):
@@ -2762,7 +2960,22 @@ class SearchEngine:
             for actual_name in actual_names:
                 if self.stop_event.is_set():
                     return
-                if mode == SEARCH_MODE_VARIABLE:
+                if mode == SEARCH_MODE_MACRO:
+                    found = extract_macro(lines, index, actual_name, language)
+                    if not found:
+                        continue
+                    signature, implementation, start_line, end_line = found
+                    result = SearchResult(
+                        name=actual_name,
+                        path=path,
+                        start_line=start_line,
+                        end_line=end_line,
+                        signature=signature,
+                        implementation=implementation,
+                        language=language,
+                        kind=SEARCH_MODE_MACRO,
+                    )
+                elif mode == SEARCH_MODE_VARIABLE:
                     found = extract_variable(
                         lines, index, actual_name, language
                     )
@@ -2821,11 +3034,12 @@ class SearchEngine:
         name_pattern=None,
     ):
         backend = _choose_backend()
-        pattern = (
-            _build_variable_pattern(name)
-            if mode == SEARCH_MODE_VARIABLE
-            else _build_pattern(name)
-        )
+        if mode == SEARCH_MODE_VARIABLE:
+            pattern = _build_variable_pattern(name)
+        elif mode == SEARCH_MODE_MACRO:
+            pattern = _build_macro_pattern(name)
+        else:
+            pattern = _build_pattern(name)
         if name_pattern is not None:
             # 不区分大小写时 rg/grep 可以直接加 -i，比 Python 扫描快得多；
             # 候选行仍会交给 _case_insensitive_name_matches 还原实际拼写。
@@ -2951,7 +3165,11 @@ class SearchEngine:
         pattern = (
             _grep_variable_pattern(name)
             if mode == SEARCH_MODE_VARIABLE
-            else _grep_pattern(name)
+            else (
+                _grep_macro_pattern(name)
+                if mode == SEARCH_MODE_MACRO
+                else _grep_pattern(name)
+            )
         )
         cmd += ["-e", pattern, "--", target]
 
@@ -2971,11 +3189,12 @@ class SearchEngine:
                     target, name
                 )
             else:
-                fallback = (
-                    _build_variable_pattern(name)
-                    if mode == SEARCH_MODE_VARIABLE
-                    else _build_pattern(name)
-                )
+                if mode == SEARCH_MODE_VARIABLE:
+                    fallback = _build_variable_pattern(name)
+                elif mode == SEARCH_MODE_MACRO:
+                    fallback = _build_macro_pattern(name)
+                else:
+                    fallback = _build_pattern(name)
                 yield from self._iter_with_python(target, fallback)
             return
 
@@ -3069,8 +3288,15 @@ class SearchEngine:
 
 
 class CodeHighlighter(QSyntaxHighlighter):
-    def __init__(self, document, function_name, name_color=DEFAULT_NAME_COLOR):
+    def __init__(
+        self,
+        document,
+        function_name,
+        name_color=DEFAULT_NAME_COLOR,
+        macro_mode=False,
+    ):
         super().__init__(document)
+        self.macro_mode = bool(macro_mode)
         self.keyword_format = QTextCharFormat()
         self.keyword_format.setForeground(QColor("#93c5fd"))
         self.keyword_format.setFontWeight(QFont.Weight.Bold)
@@ -3097,7 +3323,12 @@ class CodeHighlighter(QSyntaxHighlighter):
 
     def highlightBlock(self, text):
         covered = []
-        iterator = _STRING_COMMENT_RE.globalMatch(text)
+        comment_re = (
+            _STRING_COMMENT_NO_HASH_RE
+            if self.macro_mode
+            else _STRING_COMMENT_RE
+        )
+        iterator = comment_re.globalMatch(text)
         while iterator.hasNext():
             match = iterator.next()
             start = match.capturedStart()
@@ -3243,6 +3474,9 @@ QFrame#card[scope="instance"] {
 QFrame#card[scope="type"] {
     border-left: 4px solid #e11d48;
 }
+QFrame#card[scope="macro"] {
+    border-left: 4px solid #db2777;
+}
 QLabel#funcName {
     font-size: 16px;
     font-weight: bold;
@@ -3287,6 +3521,10 @@ QLabel#scopeBadge[scope="instance"] {
 QLabel#scopeBadge[scope="type"] {
     background-color: #ffe4e6;
     color: #be123c;
+}
+QLabel#scopeBadge[scope="macro"] {
+    background-color: #fce7f3;
+    color: #be185d;
 }
 QLabel#pathLabel {
     font-size: 12px;
@@ -3656,6 +3894,9 @@ QFrame#card[scope="instance"] {
 QFrame#card[scope="type"] {
     border-left: 4px solid #fb7185;
 }
+QFrame#card[scope="macro"] {
+    border-left: 4px solid #f472b6;
+}
 QLabel#funcName {
     color: #f8fafc;
 }
@@ -3690,6 +3931,10 @@ QLabel#scopeBadge[scope="instance"] {
 QLabel#scopeBadge[scope="type"] {
     background-color: #881337;
     color: #fecdd3;
+}
+QLabel#scopeBadge[scope="macro"] {
+    background-color: #831843;
+    color: #fbcfe8;
 }
 QLabel#pathLabel {
     color: #94a3b8;
@@ -3915,9 +4160,7 @@ class SearchWorker(QThread):
         self.root = root
         self.name = name
         self.mode = (
-            SEARCH_MODE_VARIABLE
-            if mode == SEARCH_MODE_VARIABLE
-            else SEARCH_MODE_FUNCTION
+            mode if mode in SEARCH_MODES else SEARCH_MODE_FUNCTION
         )
         self.case_sensitive = bool(case_sensitive)
         self.stop_event = threading.Event()
@@ -3971,7 +4214,7 @@ class SearchWorker(QThread):
 
 
 def result_to_text(result):
-    """返回可复制的函数实现或变量定义代码。"""
+    """返回可复制的函数实现、变量定义或宏定义代码。"""
     return result.implementation
 
 
@@ -4078,9 +4321,12 @@ class ResultCard(QFrame):
         self.kind = getattr(result, "kind", SEARCH_MODE_FUNCTION)
         self.scope = getattr(result, "scope", "")
         self.setObjectName("card")
-        # 变量卡片用左侧强调条 + 作用域徽标颜色区分全局/局部等作用域。
+        # 变量卡片用左侧强调条 + 作用域徽标颜色区分全局/局部等作用域；
+        # 宏卡片使用独立的宏配色。
         if self.kind == SEARCH_MODE_VARIABLE:
             self.setProperty("scope", self.scope)
+        elif self.kind == SEARCH_MODE_MACRO:
+            self.setProperty("scope", "macro")
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum)
 
         shadow = QGraphicsDropShadowEffect(self)
@@ -4103,16 +4349,19 @@ class ResultCard(QFrame):
         badge.setObjectName("badge")
         self.scope_label = QLabel()
         self.scope_label.setObjectName("scopeBadge")
-        if self.scope:
+        if self.kind == SEARCH_MODE_VARIABLE and self.scope:
             self.scope_label.setProperty("scope", self.scope)
+        elif self.kind == SEARCH_MODE_MACRO:
+            self.scope_label.setProperty("scope", "macro")
         self.scope_label.setVisible(
-            self.kind == SEARCH_MODE_VARIABLE and bool(self.scope)
+            (self.kind == SEARCH_MODE_VARIABLE and bool(self.scope))
+            or self.kind == SEARCH_MODE_MACRO
         )
         self.range_label = QLabel()
         self.range_label.setObjectName("muted")
         header.addWidget(name_label)
         header.addWidget(badge)
-        if self.kind == SEARCH_MODE_VARIABLE:
+        if self.kind in (SEARCH_MODE_VARIABLE, SEARCH_MODE_MACRO):
             header.addWidget(self.scope_label)
         header.addStretch(1)
         header.addWidget(self.range_label, 0, Qt.AlignmentFlag.AlignVCenter)
@@ -4151,7 +4400,11 @@ class ResultCard(QFrame):
             tooltip_key=(
                 "copy_variable_signature_tooltip"
                 if self.kind == SEARCH_MODE_VARIABLE
-                else "copy_signature_tooltip"
+                else (
+                    "copy_macro_signature_tooltip"
+                    if self.kind == SEARCH_MODE_MACRO
+                    else "copy_signature_tooltip"
+                )
             ),
         )
         self.sig_copy_btn.clicked.connect(self.copy_signature)
@@ -4176,7 +4429,11 @@ class ResultCard(QFrame):
             tooltip_key=(
                 "copy_variable_tooltip"
                 if self.kind == SEARCH_MODE_VARIABLE
-                else "copy_tooltip"
+                else (
+                    "copy_macro_tooltip"
+                    if self.kind == SEARCH_MODE_MACRO
+                    else "copy_tooltip"
+                )
             ),
             icon_color="#94a3b8",
             object_name="copyButtonDark",
@@ -4213,7 +4470,10 @@ class ResultCard(QFrame):
             else DEFAULT_NAME_COLOR
         )
         self.highlighter = CodeHighlighter(
-            code.document(), result.name, name_color
+            code.document(),
+            result.name,
+            name_color,
+            macro_mode=self.kind == SEARCH_MODE_MACRO,
         )
         self.apply_language(lang)
 
@@ -4229,6 +4489,9 @@ class ResultCard(QFrame):
                 self.scope_label.setText(
                     tr(lang, f"scope_{self.scope}")
                 )
+        elif self.kind == SEARCH_MODE_MACRO:
+            self.impl_label.setText(tr(lang, "macro_definition"))
+            self.scope_label.setText(tr(lang, "kind_macro"))
         else:
             self.impl_label.setText(tr(lang, "implementation"))
         self.copy_btn.set_language(lang)
@@ -4804,16 +5067,27 @@ class MainWindow(QMainWindow):
         self.var_mode_btn.setFixedHeight(26)
         self.var_mode_btn.setMinimumWidth(64)
         self.var_mode_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.macro_mode_btn = QPushButton()
+        self.macro_mode_btn.setObjectName("segment")
+        self.macro_mode_btn.setCheckable(True)
+        self.macro_mode_btn.setAutoExclusive(True)
+        self.macro_mode_btn.setFixedHeight(26)
+        self.macro_mode_btn.setMinimumWidth(64)
+        self.macro_mode_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.func_mode_btn.setChecked(
             self.search_mode == SEARCH_MODE_FUNCTION
         )
         self.var_mode_btn.setChecked(
             self.search_mode == SEARCH_MODE_VARIABLE
         )
+        self.macro_mode_btn.setChecked(
+            self.search_mode == SEARCH_MODE_MACRO
+        )
         search_label_row.addWidget(self.search_label)
         search_label_row.addStretch(1)
         search_label_row.addWidget(self.func_mode_btn)
         search_label_row.addWidget(self.var_mode_btn)
+        search_label_row.addWidget(self.macro_mode_btn)
         panel_layout.addLayout(search_label_row)
 
         search_row = QHBoxLayout()
@@ -4934,6 +5208,9 @@ class MainWindow(QMainWindow):
         self.var_mode_btn.clicked.connect(
             lambda: self.set_search_mode(SEARCH_MODE_VARIABLE)
         )
+        self.macro_mode_btn.clicked.connect(
+            lambda: self.set_search_mode(SEARCH_MODE_MACRO)
+        )
         self.search_btn.clicked.connect(self.start_search)
         self.stop_btn.clicked.connect(self.stop_search)
         self.search_edit.returnPressed.connect(self.start_search)
@@ -5010,6 +5287,7 @@ class MainWindow(QMainWindow):
         self.search_mode = mode
         self.func_mode_btn.setChecked(mode == SEARCH_MODE_FUNCTION)
         self.var_mode_btn.setChecked(mode == SEARCH_MODE_VARIABLE)
+        self.macro_mode_btn.setChecked(mode == SEARCH_MODE_MACRO)
         if persist:
             self.settings.setValue("search_mode", mode)
         self._update_search_mode_texts()
@@ -5023,20 +5301,25 @@ class MainWindow(QMainWindow):
         return not self.results_view.results
 
     def _update_search_mode_texts(self):
-        variable = self.search_mode == SEARCH_MODE_VARIABLE
-        self.search_label.setText(
-            tr(self.lang, "variable_name" if variable else "function_name")
-        )
+        if self.search_mode == SEARCH_MODE_MACRO:
+            label_key = "macro_name"
+            placeholder_key = "macro_placeholder"
+        elif self.search_mode == SEARCH_MODE_VARIABLE:
+            label_key = "variable_name"
+            placeholder_key = "variable_placeholder"
+        else:
+            label_key = "function_name"
+            placeholder_key = "search_placeholder"
+        self.search_label.setText(tr(self.lang, label_key))
         self.search_edit.setPlaceholderText(
-            tr(
-                self.lang,
-                "variable_placeholder" if variable else "search_placeholder",
-            )
+            tr(self.lang, placeholder_key)
         )
         self.func_mode_btn.setText(tr(self.lang, "mode_function"))
         self.var_mode_btn.setText(tr(self.lang, "mode_variable"))
+        self.macro_mode_btn.setText(tr(self.lang, "mode_macro"))
         self.func_mode_btn.setToolTip(tr(self.lang, "mode_function_tooltip"))
         self.var_mode_btn.setToolTip(tr(self.lang, "mode_variable_tooltip"))
+        self.macro_mode_btn.setToolTip(tr(self.lang, "mode_macro_tooltip"))
         self.case_btn.setText(tr(self.lang, "case_sensitive"))
         self.case_btn.setToolTip(tr(self.lang, "case_sensitive_tooltip"))
         self.case_btn.setAccessibleName(
@@ -5065,6 +5348,7 @@ class MainWindow(QMainWindow):
         scope_items = [
             ("all", tr(self.lang, "scope_filter_all")),
             ("function", tr(self.lang, "mode_function")),
+            ("macro", tr(self.lang, "mode_macro")),
             ("global", tr(self.lang, "scope_global")),
             ("local", tr(self.lang, "scope_local")),
             ("member", tr(self.lang, "scope_member")),
@@ -5209,11 +5493,12 @@ class MainWindow(QMainWindow):
         self.search_edit.setFocus()
 
     def _update_hint(self):
-        hint_key = (
-            "variable_hint"
-            if self.search_mode == SEARCH_MODE_VARIABLE
-            else "hint"
-        )
+        if self.search_mode == SEARCH_MODE_MACRO:
+            hint_key = "macro_hint"
+        elif self.search_mode == SEARCH_MODE_VARIABLE:
+            hint_key = "variable_hint"
+        else:
+            hint_key = "hint"
         hint = tr(self.lang, hint_key)
         if not self.case_sensitive:
             hint += "\n" + tr(self.lang, "hint_case_insensitive")
@@ -5264,11 +5549,10 @@ class MainWindow(QMainWindow):
         render_kwargs = dict(kwargs)
         kind_mode = render_kwargs.pop("kind_mode", None)
         if kind_mode is not None:
-            kind_key = (
-                "kind_variable"
-                if kind_mode == SEARCH_MODE_VARIABLE
-                else "kind_function"
-            )
+            kind_key = {
+                SEARCH_MODE_VARIABLE: "kind_variable",
+                SEARCH_MODE_MACRO: "kind_macro",
+            }.get(kind_mode, "kind_function")
             render_kwargs["kind"] = tr(self.lang, kind_key)
         text = tr(self.lang, key, **render_kwargs)
         if self.status_label.text() != text:
@@ -5297,23 +5581,25 @@ class MainWindow(QMainWindow):
             self.count_label.setText(text)
 
     def _update_empty_label(self):
-        # 搜索完成后的空状态沿用上一次搜索的类型，切换函数/变量只影响
-        # 下一次搜索，不应立刻改写“未找到函数/变量定义”的提示。
+        # 搜索完成后的空状态沿用上一次搜索的类型，切换函数/变量/宏只影响
+        # 下一次搜索，不应立刻改写“未找到…定义”的提示。
         mode = (
             self.current_mode
             if self.has_searched and self.empty_state == "no_results"
             else self.search_mode
         )
-        variable = mode == SEARCH_MODE_VARIABLE
+        if mode == SEARCH_MODE_MACRO:
+            initial_key = "empty_initial_macro"
+            no_results_key = "empty_no_results_macro"
+        elif mode == SEARCH_MODE_VARIABLE:
+            initial_key = "empty_initial_variable"
+            no_results_key = "empty_no_results_variable"
+        else:
+            initial_key = "empty_initial"
+            no_results_key = "empty_no_results"
         key = {
-            "initial": (
-                "empty_initial_variable" if variable else "empty_initial"
-            ),
-            "no_results": (
-                "empty_no_results_variable"
-                if variable
-                else "empty_no_results"
-            ),
+            "initial": initial_key,
+            "no_results": no_results_key,
             "failed": "empty_failed",
             "filtered": "empty_filtered",
         }.get(self.empty_state, "empty_initial")
@@ -5365,6 +5651,7 @@ class MainWindow(QMainWindow):
         self.progress.setVisible(active)
         self.func_mode_btn.setEnabled(not active)
         self.var_mode_btn.setEnabled(not active)
+        self.macro_mode_btn.setEnabled(not active)
         self.case_btn.setEnabled(not active)
 
     # -- 目录配置 -----------------------------------------------------------
@@ -5399,27 +5686,32 @@ class MainWindow(QMainWindow):
     # -- 搜索流程 -----------------------------------------------------------
 
     def start_search(self):
+        macro = self.search_mode == SEARCH_MODE_MACRO
         variable = self.search_mode == SEARCH_MODE_VARIABLE
         name = self.search_edit.text().strip()
         if not name:
-            self._set_status(
-                "error_empty_variable_name" if variable else "error_empty_name",
-                error=True,
-            )
+            if macro:
+                error_key = "error_empty_macro_name"
+            elif variable:
+                error_key = "error_empty_variable_name"
+            else:
+                error_key = "error_empty_name"
+            self._set_status(error_key, error=True)
             return
         case_sensitive = self.case_sensitive
         name_pattern = (
             r"[A-Za-z_$][A-Za-z0-9_$]*"
-            if variable
+            if (variable or macro)
             else r"~?[A-Za-z_$][A-Za-z0-9_$]*"
         )
         if not re.fullmatch(name_pattern, name):
-            self._set_status(
-                "error_invalid_variable_name"
-                if variable
-                else "error_invalid_name",
-                error=True,
-            )
+            if macro:
+                error_key = "error_invalid_macro_name"
+            elif variable:
+                error_key = "error_invalid_variable_name"
+            else:
+                error_key = "error_invalid_name"
+            self._set_status(error_key, error=True)
             return
 
         raw = self.path_edit.text().strip()

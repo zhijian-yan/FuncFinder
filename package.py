@@ -21,8 +21,14 @@
     python3 package.py --target linux
     python3 package.py --target windows
     python3 package.py --target linux --onefile --archive
+    python3 package.py --target linux --docker --onefile --archive
     python3 package.py --target linux --no-rg
     python3 package.py --write-ci
+
+Linux 兼容性：
+    产物最低支持的 glibc 由构建环境决定。默认目标为 2.35（Ubuntu 22.04）；
+    在更新的系统上请使用 --docker 在 ubuntu:22.04 容器中构建，
+    或显式调整 --glibc-max。
 """
 
 from __future__ import annotations
@@ -65,6 +71,32 @@ RG_BASE_URL = "https://github.com/BurntSushi/ripgrep/releases/download"
 
 RUNTIME_REQUIREMENTS = ["PySide6-Essentials>=6.8,<7"]
 BUILD_REQUIREMENTS = ["pyinstaller>=6.11"]
+
+# Linux 发布包以 Ubuntu 22.04 (glibc 2.35) 为最低目标；
+# PySide6 6.12 的 manylinux wheel 也需要 glibc >= 2.34。
+DEFAULT_LINUX_GLIBC = "2.35"
+DEFAULT_DOCKER_IMAGE = "ubuntu:22.04"
+# 构建时安装 Qt xcb 运行库，PyInstaller 才能把它们一起收进产物。
+LINUX_QT_RUNTIME_PACKAGES = [
+    "libegl1",
+    "libgl1",
+    "libfontconfig1",
+    "libfreetype6",
+    "libdbus-1-3",
+    "libglib2.0-0",
+    "libxkbcommon-x11-0",
+    "libxcb-cursor0",
+    "libxcb-icccm4",
+    "libxcb-image0",
+    "libxcb-keysyms1",
+    "libxcb-randr0",
+    "libxcb-render-util0",
+    "libxcb-shape0",
+    "libxcb-sync1",
+    "libxcb-util1",
+    "libxcb-xfixes0",
+    "libxcb-xkb1",
+]
 
 ROOT = Path(__file__).resolve().parent
 PACKAGING_DIR = ROOT / ".packaging"
@@ -124,6 +156,34 @@ def host_target():
     if sys.platform == "win32":
         return "windows"
     return None
+
+
+def _version_tuple(text):
+    parts = [int(part) for part in re.findall(r"\d+", str(text))[:3]]
+    while len(parts) < 3:
+        parts.append(0)
+    return tuple(parts)
+
+
+def ensure_host_glibc_compatible(max_version):
+    """构建机的 glibc 不能高于目标，否则产物无法在旧系统加载。"""
+    limit = _version_tuple(max_version)
+    if limit == (0, 0, 0):
+        raise PackagingError(f"--glibc-max 无效：{max_version}")
+    libc_name, libc_version = platform.libc_ver()
+    if libc_name != "glibc" or not libc_version:
+        log(f"  ! 无法确认 glibc 版本（{libc_name or '未知'}），跳过兼容性检查。")
+        return
+    actual = _version_tuple(libc_version)
+    if actual > limit:
+        raise PackagingError(
+            f"当前构建环境 glibc {libc_version} 高于目标上限 {max_version}。\n"
+            "生成的 Linux 包无法在 Ubuntu 22.04/24.04 等旧系统上运行。\n"
+            f"请使用 --docker 在 {DEFAULT_DOCKER_IMAGE} 中构建，"
+            "或在 Ubuntu 22.04 上构建；\n"
+            "如果只需要在当前系统运行，可加 --skip-glibc-check。"
+        )
+    log(f"  glibc 兼容性：构建环境 {libc_version} <= 目标 {max_version}")
 
 
 def run_command(command, **kwargs):
@@ -228,6 +288,89 @@ def ensure_build_python(args):
     if not check_dependencies(python):
         raise PackagingError("依赖安装完成但仍无法导入 PySide6/PyInstaller。")
     return python
+
+
+def _find_container_runtime():
+    runtime = shutil.which("docker") or shutil.which("podman")
+    if runtime is None:
+        raise PackagingError(
+            "未找到 docker 或 podman。请安装 Docker，"
+            "或直接在 Ubuntu 22.04 上运行 package.py。"
+        )
+    return runtime
+
+
+def _docker_forwarded_args(args):
+    forwarded = []
+    for flag in ("onefile", "console", "clean", "no_rg", "archive", "keep_work"):
+        if getattr(args, flag):
+            forwarded.append("--" + flag.replace("_", "-"))
+    if args.rg is not None:
+        forwarded += ["--rg", str(args.rg)]
+    if args.rg_version != RG_VERSION:
+        forwarded += ["--rg-version", args.rg_version]
+    if args.name != APP_NAME:
+        forwarded += ["--name", args.name]
+    if args.icon is not None:
+        forwarded += ["--icon", str(args.icon)]
+    forwarded += ["--glibc-max", str(args.glibc_max)]
+    if args.skip_glibc_check:
+        forwarded.append("--skip-glibc-check")
+    return forwarded
+
+
+def build_in_docker(args):
+    """在旧版 Ubuntu 容器中构建，避免把宿主机的较新 glibc 带进产物。"""
+    if host_target() != "linux":
+        raise PackagingError("--docker 仅支持在 Linux 主机上构建 Linux 包。")
+    runtime = _find_container_runtime()
+    packages = " ".join(
+        ("python3", "python3-venv", "ca-certificates", *LINUX_QT_RUNTIME_PACKAGES)
+    )
+    inner = [
+        "/tmp/funcfinder-venv/bin/python",
+        "package.py",
+        "--target",
+        "linux",
+        "--no-venv",
+        "--skip-deps",
+        *_docker_forwarded_args(args),
+    ]
+    script = " && ".join(
+        (
+            "set -e",
+            f"trap 'chown -R {os.getuid()}:{os.getgid()} "
+            "dist build .packaging 2>/dev/null || true' EXIT",
+            "apt-get update",
+            "DEBIAN_FRONTEND=noninteractive apt-get install -y "
+            f"--no-install-recommends {packages}",
+            "python3 -m venv /tmp/funcfinder-venv",
+            "/tmp/funcfinder-venv/bin/python -m pip install "
+            "--disable-pip-version-check -r requirements-dev.txt",
+            " ".join(shlex.quote(part) for part in inner),
+        )
+    )
+    command = [
+        runtime,
+        "run",
+        "--rm",
+        "-v",
+        f"{ROOT}:/src",
+        "-w",
+        "/src",
+        args.docker,
+        "bash",
+        "-lc",
+        script,
+    ]
+    log(
+        f"在容器 {args.docker} 中构建 Linux 包"
+        f"（目标 glibc {args.glibc_max}）..."
+    )
+    run_command(command, cwd=ROOT)
+    log("")
+    log(f"容器构建完成，产物位于：{ROOT / 'dist' / 'linux'}")
+    return 0
 
 
 def _download(url, destination):
@@ -585,7 +728,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: ubuntu-latest
+          # Ubuntu 22.04 (glibc 2.35) 作为 Linux 最低目标，产物可运行于 22.04/24.04。
+          - os: ubuntu-22.04
             target: linux
           - os: windows-latest
             target: windows
@@ -600,10 +744,16 @@ jobs:
 
       - name: Install Linux Qt runtime libraries
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y libegl1 libgl1
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libegl1 libgl1 libxcb-cursor0 libxkbcommon-x11-0 \\
+            libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-randr0 \\
+            libxcb-render-util0 libxcb-shape0 libxcb-sync1 libxcb-util1 \\
+            libxcb-xfixes0 libxcb-xkb1 libfontconfig1 libfreetype6 \\
+            libdbus-1-3 libglib2.0-0
 
       - name: Build package
-        run: python package.py --target ${{ matrix.target }} --no-venv --archive
+        run: python package.py --target ${{ matrix.target }} --no-venv --archive --glibc-max 2.35
 
       - uses: actions/upload-artifact@v4
         with:
@@ -630,6 +780,7 @@ def parse_arguments(argv=None):
             "示例：\n"
             "  python3 package.py --target linux\n"
             "  python3 package.py --target linux --onefile --archive\n"
+            "  python3 package.py --target linux --docker --onefile --archive\n"
             "  python3 package.py --target windows\n"
             "  python3 package.py --write-ci\n"
         ),
@@ -691,6 +842,24 @@ def parse_arguments(argv=None):
         help="保留 PyInstaller 的 build 工作目录，便于排查问题",
     )
     parser.add_argument(
+        "--docker", nargs="?", const=DEFAULT_DOCKER_IMAGE, metavar="IMAGE",
+        help=(
+            "在容器中构建 Linux 包，确保目标 glibc 兼容"
+            f"（默认 {DEFAULT_DOCKER_IMAGE}）"
+        ),
+    )
+    parser.add_argument(
+        "--glibc-max", metavar="VERSION", default=DEFAULT_LINUX_GLIBC,
+        help=(
+            "Linux 构建允许的最高 glibc 版本"
+            f"（默认 {DEFAULT_LINUX_GLIBC}，对应 Ubuntu 22.04）"
+        ),
+    )
+    parser.add_argument(
+        "--skip-glibc-check", action="store_true",
+        help="跳过构建机 glibc 兼容性检查（仅用于只在本机运行的构建）",
+    )
+    parser.add_argument(
         "--write-ci", action="store_true",
         help="生成 GitHub Actions 工作流（同时构建 Windows 和 Linux）后退出",
     )
@@ -704,6 +873,12 @@ def parse_arguments(argv=None):
         parser.error("--no-rg 和 --rg 不能同时使用。")
     if args.python and args.no_venv:
         parser.error("--python 和 --no-venv 不能同时使用。")
+    if args.docker and args.write_ci:
+        parser.error("--docker 不能和 --write-ci 同时使用。")
+    if args.docker and (args.no_venv or args.skip_deps or args.python):
+        parser.error("--docker 不能和 --no-venv/--skip-deps/--python 同时使用。")
+    if args.docker and args.target == "windows":
+        parser.error("--docker 只支持构建 Linux 包。")
     if Path(args.name).name != args.name or not args.name:
         parser.error("--name 只能是文件名，不能包含路径分隔符。")
     return args
@@ -721,6 +896,19 @@ def main(argv=None):
         log("提示：把工作流和 package.py 提交到 GitHub 后，可在 Actions 中手动触发，"
             "或在推送 v* 标签时自动构建 Windows/Linux 两个包。")
         return 0
+
+    if args.docker:
+        try:
+            return build_in_docker(args)
+        except PackagingError as exc:
+            log(f"\n错误：{exc}")
+            return 1
+        except subprocess.CalledProcessError as exc:
+            log(f"\n错误：容器构建失败（退出码 {exc.returncode}）。")
+            return 1
+        except KeyboardInterrupt:
+            log("\n已取消。")
+            return 130
 
     host = host_target()
     if host is None:
@@ -744,6 +932,11 @@ def main(argv=None):
     log(f"Python：{sys.version.split()[0]}")
 
     try:
+        if target == "linux":
+            if args.skip_glibc_check:
+                log("  已跳过 glibc 兼容性检查。")
+            else:
+                ensure_host_glibc_compatible(args.glibc_max)
         python = ensure_build_python(args)
         ripgrep = prepare_ripgrep(args, target, arch)
         paths = build_application(python, args, target, arch, ripgrep)

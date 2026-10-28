@@ -40,7 +40,7 @@ jobs:
           python -m pip install -r requirements.txt
 
       - name: Compile Python files
-        run: python -m py_compile func_finder.py package.py tests/test_desktop_integration.py tests/test_packaging.py tests/test_variable_search.py
+        run: python -m py_compile func_finder.py package.py tests/test_desktop_integration.py tests/test_packaging.py tests/test_variable_search.py tests/test_macro_search.py
 
       - name: Run unit tests
         run: python -m unittest discover -s tests -v
