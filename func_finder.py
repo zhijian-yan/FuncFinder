@@ -102,7 +102,7 @@ except ImportError as exc:  # pragma: no cover - 仅在缺少依赖时触发
     )
 
 APP_NAME = "FuncFinder"
-__version__ = "0.4.0"
+__version__ = "0.4.1"
 SEARCH_MODE_FUNCTION = "function"
 SEARCH_MODE_VARIABLE = "variable"
 SEARCH_MODE_MACRO = "macro"
@@ -5892,10 +5892,32 @@ class MainWindow(QMainWindow):
         super().closeEvent(event)
 
 
+def _configure_frozen_linux_runtime():
+    """隔离打包版自带的 GLib 与宿主系统的 GIO/GTK 模块。
+
+    PyInstaller 会收集构建机上的 GLib/GIO/GTK。发布包在 Ubuntu 22.04 上
+    构建，而 Ubuntu 24.04/26.04 等新系统的 gvfs/GIO 模块可能引用更新版
+    GLib 的符号；这些模块一旦被加载，就会出现 undefined symbol 警告，
+    严重时导致 Qt 进程崩溃（SIGBUS）。使用 Qt 的 generic 平台主题并让
+    GIO 只扫描包内一个不存在的目录，可以避免加载宿主模块。
+    """
+    if not sys.platform.startswith("linux"):
+        return
+    if not getattr(sys, "frozen", False):
+        return
+    os.environ.setdefault("QT_QPA_PLATFORMTHEME", "generic")
+    bundle = getattr(sys, "_MEIPASS", "")
+    if bundle:
+        os.environ.setdefault(
+            "GIO_MODULE_DIR", os.path.join(bundle, ".gio-modules")
+        )
+
+
 def _configure_qt_platform():
     """Wayland 会话下 Qt 的输入法集成存在崩溃风险，优先使用 XWayland。"""
     if not sys.platform.startswith("linux"):
         return
+    _configure_frozen_linux_runtime()
     if os.environ.get("QT_QPA_PLATFORM"):
         return
     if not (os.environ.get("WAYLAND_DISPLAY") and os.environ.get("DISPLAY")):

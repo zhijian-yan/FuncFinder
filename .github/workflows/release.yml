@@ -73,6 +73,7 @@ jobs:
         image:
           - ubuntu:22.04
           - ubuntu:24.04
+          - ubuntu:26.04
 
     steps:
       - name: Download Linux assets
@@ -95,6 +96,24 @@ jobs:
               bin=$(find . -maxdepth 1 -type f -name "FuncFinder-*-linux-x86_64" | head -n1)
               chmod +x "$bin"
               QT_QPA_PLATFORM=offscreen "$bin" --version
+
+              # 真实启动一次 GUI。--version 不会初始化 Qt/GIO，无法发现
+              # 打包库与宿主 gvfs/GTK 模块冲突导致的启动崩溃。
+              export HOME=/tmp/ffhome
+              mkdir -p "$HOME"
+              set +e
+              QT_QPA_PLATFORM=offscreen timeout 10 "$bin" > /tmp/ff-startup.log 2>&1
+              status=$?
+              set -e
+              cat /tmp/ff-startup.log
+              if [ "$status" -ne 0 ] && [ "$status" -ne 124 ]; then
+                echo "GUI startup failed with exit code $status" >&2
+                exit 1
+              fi
+              if grep -Eq "undefined symbol|Failed to load module|GLib-GIO-WARNING|Could not register app ID|SIGBUS|core dumped" /tmp/ff-startup.log; then
+                echo "fatal GUI startup diagnostics detected" >&2
+                exit 1
+              fi
             '
 
   build-windows:

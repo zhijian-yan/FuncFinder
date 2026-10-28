@@ -220,6 +220,10 @@ PyInstaller 会把构建机上的系统库一起打包，因此 Linux 包的最�
   `sudo apt install libgl1 libegl1`；其余 Qt/xcb 库会随包分发。
 - Release 工作流使用 `ubuntu-22.04` 构建，并会在 `ubuntu:22.04` 和
   `ubuntu:24.04` 容器中实际运行产物做兼容性验证。
+- 打包版在 Linux 上默认使用 Qt 的 `generic` 平台主题，并把 GIO 模块目录
+  指向包内专用目录，避免 Ubuntu 24.04/26.04 的 gvfs/GTK 模块与随包 GLib
+  版本不匹配；如需覆盖可自行设置 `QT_QPA_PLATFORMTHEME` 或
+  `GIO_MODULE_DIR`。
 
 ### Linux Dock 图标说明
 

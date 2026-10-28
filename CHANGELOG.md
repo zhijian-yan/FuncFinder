@@ -4,6 +4,20 @@ All notable changes to FuncFinder are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and this project follows [Semantic Versioning](https://semver.org/).
 
+## [v0.4.1] - 2026-10-28
+
+### Fixed
+
+- Linux one-file packages no longer load host GTK3/GIO/gvfs modules into the
+  bundled older GLib. This avoids `undefined symbol: g_task_set_static_name`
+  warnings and Qt SIGBUS crashes on newer distributions such as Ubuntu 26.04.
+- Frozen Linux builds now default to Qt's `generic` platform theme and an
+  isolated GIO module directory; explicit user environment settings are still
+  respected.
+- Release verification now performs a real GUI startup (not only `--version`)
+  inside Ubuntu 22.04, 24.04, and 26.04 containers and rejects fatal Qt/GIO
+  startup diagnostics.
+
 ## [v0.4.0] - 2026-10-28
 
 ### Added
@@ -108,6 +122,7 @@ and this project follows [Semantic Versioning](https://semver.org/).
 - Function extraction is heuristic and may need manual review for complex
   macros, templates, overloads, or nested definitions.
 
+[v0.4.1]: https://github.com/zhijian-yan/FuncFinder/releases/tag/v0.4.1
 [v0.4.0]: https://github.com/zhijian-yan/FuncFinder/releases/tag/v0.4.0
 [v0.3.0]: https://github.com/zhijian-yan/FuncFinder/releases/tag/v0.3.0
 [v0.2.0]: https://github.com/zhijian-yan/FuncFinder/releases/tag/v0.2.0
