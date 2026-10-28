@@ -8,7 +8,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
 
-![FuncFinder 变量模式主界面](docs/screenshot.png)
+![FuncFinder 类型模式主界面](docs/screenshot.png)
 
 ## 简介
 
@@ -28,9 +28,10 @@ FuncFinder 是一个基于 Python + PySide6/Qt 6 的桌面工具。选择一个�
   `self.attr` 实例属性，并标注结果的作用域。
 - **宏定义**：支持 C/C++/Objective-C 的 `#define`（对象宏、函数宏和多行宏）、
   C# `#define` 以及 Rust `macro_rules!`，卡片会显示完整宏体。
-- **类型定义**：支持 C/C++/Objective-C 的 `struct`/`class`/`union`/`enum`/
-  `typedef`/`using`，以及 Go、Rust、Java、C#、JavaScript/TypeScript、
-  Kotlin、Scala、Swift、Dart、Python 的类型定义。
+- **类型定义**：支持 C/C++ 的 `struct`/`class`/`union`/`enum`/`typedef`/`using`，
+  Objective-C 的 `struct`/`class`/`union`/`enum`/`typedef`，以及 Go、Rust、
+  Java、C#、JavaScript/TypeScript、Kotlin、Scala、Swift、Dart、Python
+  的类型定义。
 - **变量作用域配色**：全局、局部、成员、类属性、实例属性和类型成员使用
   不同颜色；卡片左侧强调条、作用域徽标与代码中的变量名保持一致。
 - **大小写选项**：「区分大小写」默认开启；关闭后普通名称搜索忽略大小写，
@@ -102,8 +103,10 @@ FuncFinder 是一个基于 Python + PySide6/Qt 6 的桌面工具。选择一个�
 
 类型模式使用同一套扩展名识别规则，支持：
 
-- C/C++、Objective-C：`struct`、`class`、`union`、`enum`、`typedef`（含
-  多行 typedef 主体）和 `using` 别名。
+- C/C++：`struct`、`class`、`union`、`enum`、`typedef`（含多行 typedef 主体）
+  和 `using` 别名。
+- Objective-C：`struct`、`class`、`union`、`enum`、`typedef`（含多行
+  typedef 主体）。
 - Go：`type` 声明（含 `type ( ... )` 分组）、别名和底层类型。
 - Rust：`struct`、`enum`、`trait`、`union`、`type` 别名，以及单元/元组结构体。
 - Java/C#：`class`、`interface`、`enum`、`record`、`struct`。
@@ -223,8 +226,8 @@ python package.py --target windows --onefile --archive
 
 不加 `--onefile` 时默认生成 onedir 目录（启动更快，但必须分发整个目录）。
 PyInstaller 不支持跨系统编译：Linux 包在 Linux 上构建，Windows 包在 Windows
-上构建。推送到 `v*` 标签时，仓库的 Release 工作流会同时在两个原生 runner 上
-构建并上传发布资产。
+上构建。推送到 `v*` 标签时，Release 工作流会在 Linux/Windows 两个原生 runner
+上构建，并在 Ubuntu 22.04、24.04、26.04 容器中验证 Linux 包后上传发布资产。
 
 ### Linux 兼容性
 
@@ -260,7 +263,7 @@ PyInstaller 的 `--icon` 在 Linux 上不会把图标写进 ELF。Dock 图标依
 ├── package.py                  # PyInstaller 打包脚本
 ├── assets/                     # 图标资源
 ├── docs/screenshot.png         # README 截图
-├── tests/                      # 不依赖显示器的单元测试
+├── tests/                      # 变量/宏/类型/桌面集成/打包单元测试
 ├── requirements.txt            # 运行依赖
 ├── requirements-dev.txt        # 开发/打包依赖
 ├── CHANGELOG.md
