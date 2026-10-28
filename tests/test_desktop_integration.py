@@ -18,7 +18,7 @@ import func_finder  # noqa: E402  (导入需要先设置 sys.path)
 
 class DesktopIntegrationTests(unittest.TestCase):
     def test_version(self):
-        self.assertEqual(func_finder.__version__, "0.4.1")
+        self.assertEqual(func_finder.__version__, "0.5.0")
 
     def test_frozen_linux_avoids_host_gio_modules(self):
         with mock.patch.object(

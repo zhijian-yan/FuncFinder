@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""通用函数、变量与宏定义查询工具（PySide6 / Qt 6）
+"""通用函数、变量、宏与类型定义查询工具（PySide6 / Qt 6）
 
 功能：
     1. 配置任意代码目录（自动保存，跨平台）；
     2. 在「函数」模式下输入函数名，搜索其定义与完整实现；
        在「变量」模式下输入变量名，搜索变量/常量的声明与初始值；
        在「宏」模式下输入宏名，搜索 #define / macro_rules! 宏定义；
+       在「类型」模式下输入类型名，搜索 struct/class/enum/typedef 等定义；
        可用「区分大小写」开关控制是否忽略大小写；
     3. 结果以卡片形式展示签名、来源、行号及完整代码，代码带语法高亮；
        变量结果用不同颜色区分全局/局部/成员等作用域；
@@ -21,7 +22,7 @@
 
 支持语言（按扩展名自动识别）：
     C/C++、Python、Go、Rust、Java、C#、JavaScript/TypeScript、
-    Kotlin、Scala、Swift、Dart、Objective-C（C 函数部分）。
+    Kotlin、Scala、Swift、Dart、Objective-C。
 
 依赖：
     pip install PySide6-Essentials
@@ -102,17 +103,41 @@ except ImportError as exc:  # pragma: no cover - 仅在缺少依赖时触发
     )
 
 APP_NAME = "FuncFinder"
-__version__ = "0.4.1"
+__version__ = "0.5.0"
 SEARCH_MODE_FUNCTION = "function"
 SEARCH_MODE_VARIABLE = "variable"
 SEARCH_MODE_MACRO = "macro"
+SEARCH_MODE_TYPE = "type"
 SEARCH_MODES = (
     SEARCH_MODE_FUNCTION,
     SEARCH_MODE_VARIABLE,
     SEARCH_MODE_MACRO,
+    SEARCH_MODE_TYPE,
 )
 # 支持宏定义的语言；#define 用于 C 风格语言，macro_rules! 用于 Rust。
 MACRO_LANGUAGES = {"C/C++", "Objective-C", "C#", "Rust"}
+# 各语言中表示类型定义的关键字。typedef/using/type/typealias 等别名形式
+# 在提取阶段单独处理。
+TYPE_KEYWORDS = {
+    "C/C++": ("struct", "class", "union", "enum", "typedef", "using"),
+    "Objective-C": (
+        "struct", "class", "union", "enum", "typedef",
+    ),
+    "C#": ("class", "struct", "interface", "enum", "record"),
+    "Java": ("class", "interface", "enum", "record"),
+    "Python": ("class",),
+    "Go": ("type",),
+    "Rust": ("struct", "enum", "trait", "union", "type"),
+    "JavaScript": ("class",),
+    "TypeScript": ("class", "interface", "enum", "type"),
+    "Kotlin": ("class", "interface", "object", "typealias"),
+    "Scala": ("class", "trait", "object", "enum", "type"),
+    "Swift": (
+        "class", "struct", "enum", "protocol", "typealias", "actor",
+    ),
+    "Dart": ("class", "enum", "typedef", "mixin", "extension"),
+}
+TYPE_ALIAS_KEYWORDS = {"using", "type", "typealias", "typedef", "record"}
 # GNOME Wayland 用 setDesktopFileName() 的值匹配 .desktop 文件名，因此这里
 # 保持 "func-finder"（不带 .desktop 后缀）。
 DESKTOP_FILE_NAME = "func-finder"
@@ -122,15 +147,16 @@ DESKTOP_ICON_NAME = DESKTOP_FILE_NAME
 # 是 APP_NAME；StartupWMClass 必须与它一致。
 DESKTOP_STARTUP_WM_CLASS = APP_NAME
 
-DESKTOP_COMMENT = "Search function, variable, and macro definitions"
-DESKTOP_COMMENT_ZH = "搜索代码中的函数、变量与宏定义"
-DESKTOP_GENERIC_NAME = "Function, Variable & Macro Finder"
-DESKTOP_GENERIC_NAME_ZH = "函数、变量与宏查找器"
+DESKTOP_COMMENT = "Search function, variable, macro, and type definitions"
+DESKTOP_COMMENT_ZH = "搜索代码中的函数、变量、宏与类型定义"
+DESKTOP_GENERIC_NAME = "Function, Variable, Macro & Type Finder"
+DESKTOP_GENERIC_NAME_ZH = "函数、变量、宏与类型查找器"
 DESKTOP_CATEGORIES = "Development;"
 DESKTOP_KEYWORDS = (
-    "function;variable;constant;macro;define;search;code;symbol;grep;ripgrep;"
+    "function;variable;constant;macro;type;struct;class;enum;typedef;"
+    "search;code;symbol;grep;ripgrep;"
 )
-DESKTOP_KEYWORDS_ZH = "函数;变量;常量;宏;搜索;代码;符号;"
+DESKTOP_KEYWORDS_ZH = "函数;变量;常量;宏;类型;结构体;枚举;搜索;代码;符号;"
 
 
 def _resource_path(*parts):
@@ -534,9 +560,9 @@ _STRING_COMMENT_NO_HASH_RE = QRegularExpression(
 
 TRANSLATIONS = {
     "zh": {
-        "app_title": "函数、变量与宏定义查询",
-        "title": "函数、变量与宏定义查询",
-        "subtitle": "在任意代码目录中搜索函数、变量、常量与宏的定义",
+        "app_title": "函数、变量、宏与类型定义查询",
+        "title": "函数、变量、宏与类型定义查询",
+        "subtitle": "在任意代码目录中搜索函数、变量、常量、宏与类型定义",
         "code_dir": "代码目录",
         "path_placeholder": "选择任意代码目录，例如 /home/user/project",
         "browse": "选择目录",
@@ -550,15 +576,20 @@ TRANSLATIONS = {
         "mode_function": "函数",
         "mode_variable": "变量",
         "mode_macro": "宏",
+        "mode_type": "类型",
         "mode_function_tooltip": "搜索函数定义与完整实现",
         "mode_variable_tooltip": "搜索变量、常量的定义与初始值",
         "mode_macro_tooltip": "搜索 #define 与 macro_rules! 宏定义",
+        "mode_type_tooltip": "搜索 struct、class、enum、typedef 等类型定义",
+        "search_type": "搜索类型",
         "function_name": "函数名称",
         "variable_name": "变量名称",
         "macro_name": "宏名称",
+        "type_name": "类型名称",
         "search_placeholder": "例如：i2c_transfer、parse_config、main",
         "variable_placeholder": "例如：MAX_BUFFER_SIZE、config、timeout",
         "macro_placeholder": "例如：MAX_BUFFER_SIZE、I2C_TRANSFER、MIN",
+        "type_placeholder": "例如：Config、device_info_t、Status",
         "case_sensitive": "区分大小写",
         "case_sensitive_tooltip": "区分大小写；关闭后 A 和 a 视为相同",
         "search": "搜索",
@@ -573,6 +604,11 @@ TRANSLATIONS = {
         "macro_hint": (
             "支持 C/C++/Objective-C 的 #define（对象宏、函数宏和多行宏），"
             "以及 C# #define 和 Rust macro_rules!"
+        ),
+        "type_hint": (
+            "支持 C/C++/Objective-C 的 struct/class/union/enum/typedef/using，"
+            "以及 Go/Rust/Java/C#/JavaScript/TypeScript/Kotlin/Scala/Swift/Dart/Python "
+            "的类型定义"
         ),
         "hint_case_insensitive": "不区分大小写：A 与 a 视为相同。",
         "engine_label": "引擎：{engine}",
@@ -625,6 +661,14 @@ TRANSLATIONS = {
             "未找到宏定义\n"
             "可尝试其他宏名，或确认代码目录和文件扩展名是否受支持"
         ),
+        "empty_initial_type": (
+            "配置代码目录，输入类型名开始搜索\n"
+            "支持 struct、class、enum、typedef、interface、trait 等"
+        ),
+        "empty_no_results_type": (
+            "未找到类型定义\n"
+            "可尝试其他类型名，或确认代码目录和文件扩展名是否受支持"
+        ),
         "empty_failed": "搜索出错，请检查代码目录是否可读",
         "theme_dark": "深色模式",
         "theme_light": "浅色模式",
@@ -642,12 +686,17 @@ TRANSLATIONS = {
         "error_invalid_macro_name": (
             "宏名不合法：只能包含字母、数字、下划线、$，且不能以数字开头。"
         ),
+        "error_empty_type_name": "请输入要查询的类型名。",
+        "error_invalid_type_name": (
+            "类型名不合法：只能包含字母、数字、下划线、$，且不能以数字开头。"
+        ),
         "error_no_dir": "请先配置有效的代码目录。",
         "searching": "正在搜索 “{name}” ...",
         "stopping": "正在停止搜索 “{name}” ...",
         "kind_function": "函数",
         "kind_variable": "变量",
         "kind_macro": "宏",
+        "kind_type": "类型",
         "searching_progress": (
             "正在搜索 “{name}” ... 已扫描 {scanned} 个候选，找到 {count} 个{kind}"
         ),
@@ -664,6 +713,7 @@ TRANSLATIONS = {
         "implementation": "完整实现",
         "variable_definition": "变量定义",
         "macro_definition": "宏定义",
+        "type_definition": "类型定义",
         "scope_global": "全局变量",
         "scope_local": "局部变量",
         "scope_member": "成员变量",
@@ -676,13 +726,15 @@ TRANSLATIONS = {
         "copy_variable_signature_tooltip": "复制变量声明",
         "copy_macro_tooltip": "复制该宏的完整定义代码",
         "copy_macro_signature_tooltip": "复制宏声明",
+        "copy_type_tooltip": "复制该类型的完整定义代码",
+        "copy_type_signature_tooltip": "复制类型声明",
         "copied": "已复制",
     },
     "en": {
-        "app_title": "Function, Variable & Macro Finder",
-        "title": "Function, Variable & Macro Finder",
+        "app_title": "Function, Variable, Macro & Type Finder",
+        "title": "Function, Variable, Macro & Type Finder",
         "subtitle": (
-            "Search function, variable, constant, and macro definitions "
+            "Search function, variable, constant, macro, and type definitions "
             "in any code directory"
         ),
         "code_dir": "Code directory",
@@ -698,15 +750,22 @@ TRANSLATIONS = {
         "mode_function": "Function",
         "mode_variable": "Variable",
         "mode_macro": "Macro",
+        "mode_type": "Type",
         "mode_function_tooltip": "Search function definitions and implementations",
         "mode_variable_tooltip": "Search variable and constant definitions",
         "mode_macro_tooltip": "Search #define and macro_rules! definitions",
+        "mode_type_tooltip": (
+            "Search struct, class, enum, typedef, interface, and trait definitions"
+        ),
+        "search_type": "Search type",
         "function_name": "Function name",
         "variable_name": "Variable name",
         "macro_name": "Macro name",
+        "type_name": "Type name",
         "search_placeholder": "e.g. i2c_transfer, parse_config, main",
         "variable_placeholder": "e.g. MAX_BUFFER_SIZE, config, timeout",
         "macro_placeholder": "e.g. MAX_BUFFER_SIZE, I2C_TRANSFER, MIN",
+        "type_placeholder": "e.g. Config, device_info_t, Status",
         "case_sensitive": "Match case",
         "case_sensitive_tooltip": (
             "Match case; when off, A and a are treated the same"
@@ -724,6 +783,11 @@ TRANSLATIONS = {
         "macro_hint": (
             "Supports C/C++/Objective-C #define macros (object-like, "
             "function-like, and multi-line), C# #define, and Rust macro_rules!"
+        ),
+        "type_hint": (
+            "Supports C/C++/Objective-C struct/class/union/enum/typedef/using, "
+            "plus type definitions in Go, Rust, Java, C#, JavaScript/TypeScript, "
+            "Kotlin, Scala, Swift, Dart, and Python."
         ),
         "hint_case_insensitive": (
             "Case-insensitive: A and a are treated the same."
@@ -785,6 +849,14 @@ TRANSLATIONS = {
             "No macro definition found\n"
             "Try another name, or check the code directory and supported file extensions"
         ),
+        "empty_initial_type": (
+            "Configure a code directory and enter a type name to start\n"
+            "Supports struct, class, enum, typedef, interface, trait, and more"
+        ),
+        "empty_no_results_type": (
+            "No type definition found\n"
+            "Try another name, or check the code directory and supported file extensions"
+        ),
         "empty_failed": "Search failed. Check that the code directory is readable.",
         "theme_dark": "Dark mode",
         "theme_light": "Light mode",
@@ -805,12 +877,18 @@ TRANSLATIONS = {
             "Invalid macro name: use letters, digits, underscores, or $, "
             "and do not start with a digit."
         ),
+        "error_empty_type_name": "Please enter a type name.",
+        "error_invalid_type_name": (
+            "Invalid type name: use letters, digits, underscores, or $, "
+            "and do not start with a digit."
+        ),
         "error_no_dir": "Configure a valid code directory first.",
         "searching": "Searching for “{name}” ...",
         "stopping": "Stopping “{name}” ...",
         "kind_function": "function",
         "kind_variable": "variable",
         "kind_macro": "macro",
+        "kind_type": "type",
         "searching_progress": (
             "Searching “{name}” ... scanned {scanned} candidates, "
             "definitions found: {count}"
@@ -830,6 +908,7 @@ TRANSLATIONS = {
         "implementation": "Implementation",
         "variable_definition": "Variable definition",
         "macro_definition": "Macro definition",
+        "type_definition": "Type definition",
         "scope_global": "Global variable",
         "scope_local": "Local variable",
         "scope_member": "Member",
@@ -842,6 +921,8 @@ TRANSLATIONS = {
         "copy_variable_signature_tooltip": "Copy variable declaration",
         "copy_macro_tooltip": "Copy the macro's full definition code",
         "copy_macro_signature_tooltip": "Copy macro declaration",
+        "copy_type_tooltip": "Copy the type's full definition code",
+        "copy_type_signature_tooltip": "Copy type declaration",
         "copied": "Copied",
     },
 }
@@ -884,7 +965,7 @@ class SearchResult:
     signature: str
     implementation: str
     language: str
-    # "function"、"variable" 或 "macro"；默认值保证旧调用方式仍然可用。
+    # "function"、"variable"、"macro" 或 "type"；默认值保证旧调用方式仍然可用。
     kind: str = SEARCH_MODE_FUNCTION
     # 变量所在作用域：global / local / member / class / instance / type。
     scope: str = ""
@@ -901,6 +982,7 @@ SCOPE_CODE_COLORS = {
     "type": "#fb7185",
 }
 DEFAULT_NAME_COLOR = "#fbbf24"
+TYPE_CODE_COLOR = "#2dd4bf"
 
 # 结果工具栏使用的筛选/排序键。
 RESULT_SORT_KEYS = ("default", "name", "path", "scope", "language")
@@ -908,6 +990,7 @@ RESULT_SCOPE_FILTERS = (
     "all",
     "function",
     "macro",
+    "type_def",
     "global",
     "local",
     "member",
@@ -932,6 +1015,9 @@ def result_matches_filter(result, filter_text, scope_filter="all"):
             return False
     elif scope_filter == "macro":
         if result.kind != SEARCH_MODE_MACRO:
+            return False
+    elif scope_filter == "type_def":
+        if result.kind != SEARCH_MODE_TYPE:
             return False
     elif scope_filter != "all":
         if result.kind != SEARCH_MODE_VARIABLE or result.scope != scope_filter:
@@ -2742,6 +2828,475 @@ def extract_variable(lines, line_idx, name, language):
 
 
 # ---------------------------------------------------------------------------
+# 类型定义解析
+# ---------------------------------------------------------------------------
+
+# 类型名与函数体/继承列表之间允许出现的修饰词。
+_TYPE_BODY_WORDS = {
+    "final", "sealed", "abstract", "open", "data", "value", "annotation",
+    "indirect", "partial", "readonly", "ref", "record", "struct", "class",
+    "interface", "enum", "protocol", "trait", "object", "mixin", "extension",
+    "actor", "constructor", "where", "extends", "implements", "with", "on",
+    "of", "derives", "pub", "crate", "async", "unsafe", "__attribute__",
+    "__declspec",
+}
+_TYPE_INHERITANCE_WORDS = {"extends", "implements", "with", "where", "on", "of"}
+
+
+def _mask_type_text(text, language):
+    """按行屏蔽字符串和注释，保持字符位置不变。"""
+    return "".join(
+        _mask_line(line, language) for line in text.splitlines(keepends=True)
+    )
+
+
+def _strip_balanced_groups(text):
+    """反复移除成对的 (...) [...] <...>，用于分析类型名后的声明片段。"""
+    previous = None
+    while previous != text:
+        previous = text
+        text = re.sub(r"\([^()]*\)", " ", text)
+        text = re.sub(r"\[[^\[\]]*\]", " ", text)
+        text = re.sub(r"<[^<>]*>", " ", text)
+    return text
+
+
+def _type_body_prefix_ok(between):
+    """判断类型名与 '{' 之间的内容是否仍是类型声明。
+
+    这样可以排除 ``struct Foo *get_foo() {``、``struct Foo foo {`` 等
+    函数返回值或变量声明，避免把函数体误当成类型体。
+    """
+    text = _strip_balanced_groups(between)
+    inherited = False
+    for match in re.finditer(r"[A-Za-z_$][A-Za-z0-9_$]*|:", text):
+        token = match.group(0)
+        if token == ":" or token in _TYPE_INHERITANCE_WORDS:
+            inherited = True
+        elif inherited:
+            continue
+        elif token in _TYPE_BODY_WORDS:
+            continue
+        elif token.startswith("__") or re.fullmatch(
+            r"[A-Z_][A-Z0-9_]*", token
+        ):
+            continue
+        else:
+            return False
+    if not inherited and any(char in text for char in "*&,"):
+        return False
+    return True
+
+
+def _type_name_prefix_ok(prefix):
+    """检查类型关键字与名称之间没有别的标识符。
+
+    允许 __attribute__ 以及 EXPORT/API_EXPORT 这类全大写导出宏。
+    """
+    text = _strip_balanced_groups(prefix)
+    for match in re.finditer(r"[A-Za-z_$][A-Za-z0-9_$]*|[*&,]", text):
+        token = match.group(0)
+        if token in ("*", "&", ","):
+            return False
+        if token in _TYPE_BODY_WORDS:
+            continue
+        if token.startswith("__"):
+            continue
+        if re.fullmatch(r"[A-Z_][A-Z0-9_]*", token):
+            continue
+        return False
+    return True
+
+
+def _type_braced_prefix_ok(between, language, keyword):
+    if not _type_body_prefix_ok(between):
+        return False
+    if between.lstrip().startswith("("):
+        # 只有 record 以及 Kotlin/Scala/Java/C# 的主构造器可以跟在类型名后。
+        return keyword == "record" or (
+            keyword in ("class", "struct")
+            and language in ("Kotlin", "Scala", "Java", "C#")
+        )
+    return True
+
+
+def _compact_type_signature(implementation, name):
+    """类型卡片顶部的声明摘要：去掉花括号主体并压缩空白。"""
+    text = implementation
+    stripped_body = False
+    open_idx = _find_code_token(text, 0, len(text), "{")
+    if open_idx >= 0:
+        close_idx = _matching_brace(text, open_idx)
+        if close_idx >= 0 and "=" not in text[:open_idx]:
+            text = text[:open_idx] + " " + text[close_idx + 1:]
+            stripped_body = True
+    signature = " ".join(text.split())
+    signature = re.sub(r"\s+([;,])", r"\1", signature)
+    if stripped_body:
+        signature = signature.rstrip(";").rstrip()
+    if len(signature) > 400:
+        signature = signature[:397].rstrip() + "..."
+    if name not in signature:
+        signature = f"{signature} {name}".strip()
+    return signature
+
+
+def _extract_type_statement(lines, start_idx, name, language, prefix=""):
+    """提取 typedef/using/type/typealias/record 等无花括号或整条语句形式。"""
+    collected = _collect_statement(lines, start_idx, language)
+    if not collected:
+        return None
+    implementation, start_line, end_line = collected
+    signature = _compact_type_signature(prefix + implementation, name)
+    return signature, implementation, start_line, end_line
+
+
+def _extract_braced_type(
+    lines, start_idx, name, language, text, masked_text, name_match,
+    keyword="",
+):
+    """提取带花括号主体的类型定义。"""
+    open_idx = _body_open(text, name_match.end())
+    if open_idx < 0:
+        return None
+    between = _mask_type_text(text[name_match.end() : open_idx], language)
+    if not _type_braced_prefix_ok(between, language, keyword):
+        return None
+    close_idx = _matching_brace(text, open_idx)
+    if close_idx < 0:
+        # 类型体超出上下文窗口时扩展到文件末尾重新匹配。
+        text = "".join(lines[start_idx:])
+        masked_text = _mask_type_text(text, language)
+        name_match = re.search(_name_regex(name), masked_text)
+        if name_match is None:
+            return None
+        open_idx = _body_open(text, name_match.end())
+        if open_idx < 0:
+            return None
+        between = _mask_type_text(
+            text[name_match.end() : open_idx], language
+        )
+        if not _type_braced_prefix_ok(between, language, keyword):
+            return None
+        close_idx = _matching_brace(text, open_idx)
+        if close_idx < 0:
+            return None
+
+    end = close_idx + 1
+    tail = re.match(r"\s*;", text[end : end + 32])
+    if tail:
+        end += tail.end()
+    implementation = text[:end].strip()
+    signature = _compact_type_signature(implementation, name)
+    end_line = start_idx + 1 + implementation.count("\n")
+    return signature, implementation, start_idx + 1, end_line
+
+
+def _in_go_type_group(lines, line_idx):
+    """判断当前行是否位于 Go 的 ``type ( ... )`` 分组声明中。"""
+    masked = _mask_line(lines[line_idx], "Go")
+    if not masked.strip():
+        return False
+    indent = _indent_width(lines[line_idx])
+    for idx in range(line_idx - 1, max(-1, line_idx - 200), -1):
+        raw = lines[idx]
+        code = _mask_line(raw, "Go").strip()
+        if not code or code.startswith(("//", "/*", "*")):
+            continue
+        if _indent_width(raw) < indent:
+            return bool(re.match(r"^type\s*\(\s*$", code))
+    return False
+
+
+def _find_typedef_start(lines, line_idx, language):
+    """从 typedef 的收尾行向上找到起始行。
+
+    支持两种写法：
+        } Foo;
+        Foo;   # 别名单独写在下一行，上一非空行以 } 结尾
+    """
+    current = _mask_line(lines[line_idx], language)
+    if "}" not in current:
+        prev_idx = line_idx - 1
+        while prev_idx >= 0 and not _mask_line(lines[prev_idx], language).strip():
+            prev_idx -= 1
+        if prev_idx < 0 or not _mask_line(
+            lines[prev_idx], language
+        ).strip().endswith("}"):
+            return None
+
+    depth = 0
+    lower = max(-1, line_idx - MAX_CONTEXT_LINES)
+    for idx in range(line_idx, lower, -1):
+        code = _mask_line(lines[idx], language)
+        depth += code.count("}") - code.count("{")
+        if depth < 0:
+            return None
+        if re.search(r"\btypedef\b", code):
+            return idx
+        if idx < line_idx and depth == 0:
+            return None
+    return None
+
+
+def _typedef_alias(masked):
+    """从已屏蔽注释的 typedef 语句中取别名。"""
+    enum_macro = re.search(
+        r"\b(?:NS_ENUM|NS_OPTIONS|NS_CLOSED_ENUM|NS_ERROR_ENUM|"
+        r"CF_ENUM|CF_OPTIONS)\s*\(\s*[^,]+,\s*"
+        r"([A-Za-z_$][A-Za-z0-9_$]*)\s*\)",
+        masked,
+    )
+    if enum_macro:
+        return enum_macro.group(1)
+    pointer = re.search(
+        r"\(\s*\*\s*(?:const\s+)?([A-Za-z_$][A-Za-z0-9_$]*)"
+        r"\s*(?:\[[^\]]*\])?\s*\)",
+        masked,
+    )
+    if pointer:
+        return pointer.group(1)
+    text = masked.rstrip()
+    if text.endswith(";"):
+        text = text[:-1]
+    text = re.sub(r"\[[^\]]*\]", "", text)
+    names = re.findall(r"[A-Za-z_$][A-Za-z0-9_$]*", text)
+    return names[-1] if names else ""
+
+
+def extract_python_class(lines, line_idx, name):
+    """提取 Python class 定义（包含装饰器）。"""
+    line = lines[line_idx]
+    match = re.match(
+        r"^([ \t]*)class\s+" + re.escape(name) + r"(?![A-Za-z0-9_$])",
+        line,
+    )
+    if not match:
+        return None
+
+    class_indent = _indent_width(line)
+    end_idx = min(len(lines), line_idx + MAX_CONTEXT_LINES)
+    text = "".join(lines[line_idx:end_idx])
+    colon_idx = _find_python_colon(text, match.end())
+    if colon_idx < 0:
+        return None
+    signature = " ".join(text[: colon_idx + 1].split())
+    start_idx = _python_decorator_start(lines, line_idx)
+
+    same_line = text[colon_idx + 1 :].split("\n", 1)[0]
+    if same_line.strip() and not same_line.strip().startswith("#"):
+        implementation = "".join(lines[start_idx : line_idx + 1]).rstrip()
+        return signature, implementation, start_idx + 1, line_idx + 1
+
+    colon_line_idx = line_idx + text[:colon_idx].count("\n")
+    body_end = colon_line_idx
+    idx = colon_line_idx + 1
+    while idx < len(lines):
+        current = lines[idx]
+        if not current.strip():
+            idx += 1
+            continue
+        indent = _indent_width(current)
+        if current.strip().startswith("#"):
+            if indent > class_indent:
+                body_end = idx
+            idx += 1
+            continue
+        if indent <= class_indent:
+            break
+        body_end = idx
+        idx += 1
+
+    implementation = "".join(lines[start_idx : body_end + 1]).rstrip()
+    return signature, implementation, start_idx + 1, body_end + 1
+
+
+def extract_type(lines, line_idx, name, language):
+    """提取类型定义：struct/class/enum/typedef/interface/trait 等。"""
+    if language == "Python":
+        return extract_python_class(lines, line_idx, name)
+    keywords = TYPE_KEYWORDS.get(language)
+    if not keywords:
+        return None
+    if _in_block_comment(lines, line_idx):
+        return None
+
+    line = lines[line_idx]
+    masked_line = _mask_line(line, language)
+    name_match = re.search(_name_regex(name), masked_line)
+    if name_match is None:
+        return None
+
+    # Objective-C 的 @interface/@protocol 以 @end 结束，没有花括号体。
+    if language == "Objective-C":
+        objc = re.match(
+            r"^[ \t]*@\s*(interface|protocol)\s+"
+            + re.escape(name)
+            + r"(?![A-Za-z0-9_$])",
+            masked_line,
+        )
+        if objc:
+            end_idx = None
+            limit = min(len(lines), line_idx + MAX_CONTEXT_LINES)
+            for idx in range(line_idx, limit):
+                if re.match(
+                    r"^[ \t]*@\s*end\b",
+                    _mask_line(lines[idx], language),
+                ):
+                    end_idx = idx
+                    break
+            if end_idx is None:
+                return None
+            implementation = "".join(
+                lines[line_idx : end_idx + 1]
+            ).strip()
+            signature = " ".join(line.strip().split())
+            return signature, implementation, line_idx + 1, end_idx + 1
+
+    # Go 的 type ( ... ) 分组声明：当前行本身就是 `Name struct {` 等形式。
+    if language == "Go" and _in_go_type_group(lines, line_idx):
+        if not re.match(
+            r"^[ \t]*" + _name_regex(name) + r"\b", masked_line
+        ):
+            return None
+        if "{" in masked_line[name_match.end() :]:
+            end_idx = min(len(lines), line_idx + MAX_CONTEXT_LINES)
+            text = "".join(lines[line_idx:end_idx])
+            found = _extract_braced_type(
+                lines,
+                line_idx,
+                name,
+                language,
+                text,
+                _mask_type_text(text, language),
+                name_match,
+            )
+            if found is None:
+                return None
+            signature, implementation, start_line, end_line = found
+            return (
+                "type " + signature,
+                implementation,
+                start_line,
+                end_line,
+            )
+        return _extract_type_statement(
+            lines, line_idx, name, language, prefix="type "
+        )
+
+    start_idx = line_idx
+    line_prefix = masked_line[: name_match.start()]
+    keyword_re = r"\b(?:" + "|".join(
+        re.escape(keyword) for keyword in keywords
+    ) + r")\b"
+    line_keywords = list(re.finditer(keyword_re, line_prefix))
+
+    # typedef 的别名可能写在收尾行，例如：
+    #   typedef struct {
+    #       ...
+    #   } Foo;
+    if not line_keywords and language in ("C/C++", "Objective-C"):
+        typedef_start = _find_typedef_start(lines, line_idx, language)
+        if typedef_start is None:
+            return None
+        start_idx = typedef_start
+
+    end_idx = min(len(lines), start_idx + MAX_CONTEXT_LINES)
+    text = "".join(lines[start_idx:end_idx])
+    masked_text = _mask_type_text(text, language)
+    name_match = re.search(_name_regex(name), masked_text)
+    if name_match is None:
+        return None
+    prefix = masked_text[: name_match.start()]
+
+    # C 风格 typedef 的别名通常在语句末尾，单独解析。
+    if language in ("C/C++", "Objective-C") and re.search(
+        r"\btypedef\b", prefix
+    ):
+        collected = _collect_statement(lines, start_idx, language)
+        if not collected:
+            return None
+        implementation, start_line, end_line = collected
+        masked_impl = _mask_type_text(implementation, language)
+        alias = _typedef_alias(masked_impl)
+        if alias != name and not re.search(
+            r"\b(?:struct|union|enum|class)\s+" + _name_regex(name),
+            masked_impl,
+        ):
+            return None
+        signature = _compact_type_signature(implementation, name)
+        return signature, implementation, start_line, end_line
+
+    keyword_matches = list(re.finditer(keyword_re, prefix))
+    if not keyword_matches:
+        return None
+    keyword_match = keyword_matches[-1]
+    keyword = keyword_match.group(0)
+    if not _type_name_prefix_ok(prefix[keyword_match.end() :]):
+        return None
+
+    is_record = bool(re.search(r"\brecord\b", prefix))
+    between = prefix[keyword_match.end() :]
+    if keyword in TYPE_ALIAS_KEYWORDS:
+        if keyword == "record":
+            if between.strip() not in ("", "class", "struct"):
+                return None
+        elif between.strip():
+            return None
+
+    if language == "Go" and keyword == "type":
+        after_name = (
+            masked_line[name_match.end() :]
+            if start_idx == line_idx
+            else ""
+        )
+        if "{" in after_name:
+            found = _extract_braced_type(
+                lines, start_idx, name, language, text, masked_text,
+                name_match, keyword=keyword,
+            )
+            if found:
+                return found
+        return _extract_type_statement(
+            lines, start_idx, name, language
+        )
+
+    if keyword == "record" or (
+        is_record and keyword not in TYPE_ALIAS_KEYWORDS
+    ):
+        found = _extract_braced_type(
+            lines, start_idx, name, language, text, masked_text, name_match,
+            keyword=keyword,
+        )
+        if found:
+            return found
+        return _extract_type_statement(
+            lines, start_idx, name, language
+        )
+
+    if keyword in TYPE_ALIAS_KEYWORDS:
+        return _extract_type_statement(
+            lines, start_idx, name, language
+        )
+
+    found = _extract_braced_type(
+        lines, start_idx, name, language, text, masked_text, name_match,
+        keyword=keyword,
+    )
+    if found:
+        return found
+
+    # Rust 的单元结构体和元组结构体没有花括号。
+    if language == "Rust" and keyword == "struct":
+        rest = masked_text[name_match.end() :]
+        if re.match(r"\s*(?:<[^>]*>)?\s*(?:;|\()", rest):
+            return _extract_type_statement(
+                lines, start_idx, name, language
+            )
+    return None
+
+
+# ---------------------------------------------------------------------------
 # 搜索实现
 # ---------------------------------------------------------------------------
 
@@ -2843,6 +3398,11 @@ def _build_macro_pattern(name):
     )
 
 
+def _build_type_pattern(name):
+    """类型名可能出现在 typedef 的收尾行，这里先做宽泛的名称候选匹配。"""
+    return _name_regex(name)
+
+
 _BACKEND_LABELS = {"rg": "ripgrep", "grep": "grep", "python": "Python"}
 
 
@@ -2893,6 +3453,11 @@ def _grep_macro_pattern(name):
         r"^[[:space:]]*#[[:space:]]*define[[:space:]]+" + escaped + end
         + r"|^[[:space:]]*macro_rules![[:space:]]*" + escaped + end
     )
+
+
+def _grep_type_pattern(name):
+    """grep 后端的类型名候选匹配。"""
+    return _grep_variable_pattern(name)
 
 
 class SearchEngine:
@@ -2947,6 +3512,8 @@ class SearchEngine:
                 continue
             if mode == SEARCH_MODE_MACRO and language not in MACRO_LANGUAGES:
                 continue
+            if mode == SEARCH_MODE_TYPE and language not in TYPE_KEYWORDS:
+                continue
             lines = cache.get(path)
             index = lineno - 1
             if index < 0 or index >= len(lines):
@@ -2960,7 +3527,24 @@ class SearchEngine:
             for actual_name in actual_names:
                 if self.stop_event.is_set():
                     return
-                if mode == SEARCH_MODE_MACRO:
+                if mode == SEARCH_MODE_TYPE:
+                    found = extract_type(
+                        lines, index, actual_name, language
+                    )
+                    if not found:
+                        continue
+                    signature, implementation, start_line, end_line = found
+                    result = SearchResult(
+                        name=actual_name,
+                        path=path,
+                        start_line=start_line,
+                        end_line=end_line,
+                        signature=signature,
+                        implementation=implementation,
+                        language=language,
+                        kind=SEARCH_MODE_TYPE,
+                    )
+                elif mode == SEARCH_MODE_MACRO:
                     found = extract_macro(lines, index, actual_name, language)
                     if not found:
                         continue
@@ -3014,12 +3598,11 @@ class SearchEngine:
                         language=language,
                         kind=SEARCH_MODE_FUNCTION,
                     )
-                if pattern is not None:
-                    # 同一行可能多次出现同一个名称；也只保留一个定义。
-                    key = (path, actual_name, start_line, end_line)
-                    if key in emitted:
-                        continue
-                    emitted.add(key)
+                # 同一行/同一 typedef 可能多次出现同一个名称；只保留一个定义。
+                key = (path, actual_name, start_line, end_line)
+                if key in emitted:
+                    continue
+                emitted.add(key)
                 yield result
 
     @staticmethod
@@ -3038,6 +3621,8 @@ class SearchEngine:
             pattern = _build_variable_pattern(name)
         elif mode == SEARCH_MODE_MACRO:
             pattern = _build_macro_pattern(name)
+        elif mode == SEARCH_MODE_TYPE:
+            pattern = _build_type_pattern(name)
         else:
             pattern = _build_pattern(name)
         if name_pattern is not None:
@@ -3168,7 +3753,11 @@ class SearchEngine:
             else (
                 _grep_macro_pattern(name)
                 if mode == SEARCH_MODE_MACRO
-                else _grep_pattern(name)
+                else (
+                    _grep_type_pattern(name)
+                    if mode == SEARCH_MODE_TYPE
+                    else _grep_pattern(name)
+                )
             )
         )
         cmd += ["-e", pattern, "--", target]
@@ -3193,6 +3782,8 @@ class SearchEngine:
                     fallback = _build_variable_pattern(name)
                 elif mode == SEARCH_MODE_MACRO:
                     fallback = _build_macro_pattern(name)
+                elif mode == SEARCH_MODE_TYPE:
+                    fallback = _build_type_pattern(name)
                 else:
                     fallback = _build_pattern(name)
                 yield from self._iter_with_python(target, fallback)
@@ -3477,6 +4068,9 @@ QFrame#card[scope="type"] {
 QFrame#card[scope="macro"] {
     border-left: 4px solid #db2777;
 }
+QFrame#card[scope="type_def"] {
+    border-left: 4px solid #0d9488;
+}
 QLabel#funcName {
     font-size: 16px;
     font-weight: bold;
@@ -3525,6 +4119,10 @@ QLabel#scopeBadge[scope="type"] {
 QLabel#scopeBadge[scope="macro"] {
     background-color: #fce7f3;
     color: #be185d;
+}
+QLabel#scopeBadge[scope="type_def"] {
+    background-color: #ccfbf1;
+    color: #0f766e;
 }
 QLabel#pathLabel {
     font-size: 12px;
@@ -3897,6 +4495,9 @@ QFrame#card[scope="type"] {
 QFrame#card[scope="macro"] {
     border-left: 4px solid #f472b6;
 }
+QFrame#card[scope="type_def"] {
+    border-left: 4px solid #2dd4bf;
+}
 QLabel#funcName {
     color: #f8fafc;
 }
@@ -3935,6 +4536,10 @@ QLabel#scopeBadge[scope="type"] {
 QLabel#scopeBadge[scope="macro"] {
     background-color: #831843;
     color: #fbcfe8;
+}
+QLabel#scopeBadge[scope="type_def"] {
+    background-color: #134e4a;
+    color: #99f6e4;
 }
 QLabel#pathLabel {
     color: #94a3b8;
@@ -4322,11 +4927,13 @@ class ResultCard(QFrame):
         self.scope = getattr(result, "scope", "")
         self.setObjectName("card")
         # 变量卡片用左侧强调条 + 作用域徽标颜色区分全局/局部等作用域；
-        # 宏卡片使用独立的宏配色。
+        # 宏和类型卡片使用各自独立的配色。
         if self.kind == SEARCH_MODE_VARIABLE:
             self.setProperty("scope", self.scope)
         elif self.kind == SEARCH_MODE_MACRO:
             self.setProperty("scope", "macro")
+        elif self.kind == SEARCH_MODE_TYPE:
+            self.setProperty("scope", "type_def")
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum)
 
         shadow = QGraphicsDropShadowEffect(self)
@@ -4353,15 +4960,21 @@ class ResultCard(QFrame):
             self.scope_label.setProperty("scope", self.scope)
         elif self.kind == SEARCH_MODE_MACRO:
             self.scope_label.setProperty("scope", "macro")
+        elif self.kind == SEARCH_MODE_TYPE:
+            self.scope_label.setProperty("scope", "type_def")
         self.scope_label.setVisible(
             (self.kind == SEARCH_MODE_VARIABLE and bool(self.scope))
-            or self.kind == SEARCH_MODE_MACRO
+            or self.kind in (SEARCH_MODE_MACRO, SEARCH_MODE_TYPE)
         )
         self.range_label = QLabel()
         self.range_label.setObjectName("muted")
         header.addWidget(name_label)
         header.addWidget(badge)
-        if self.kind in (SEARCH_MODE_VARIABLE, SEARCH_MODE_MACRO):
+        if self.kind in (
+            SEARCH_MODE_VARIABLE,
+            SEARCH_MODE_MACRO,
+            SEARCH_MODE_TYPE,
+        ):
             header.addWidget(self.scope_label)
         header.addStretch(1)
         header.addWidget(self.range_label, 0, Qt.AlignmentFlag.AlignVCenter)
@@ -4395,17 +5008,14 @@ class ResultCard(QFrame):
         self.signature_label.setTextInteractionFlags(
             Qt.TextInteractionFlag.TextSelectableByMouse
         )
+        signature_tooltip = {
+            SEARCH_MODE_VARIABLE: "copy_variable_signature_tooltip",
+            SEARCH_MODE_MACRO: "copy_macro_signature_tooltip",
+            SEARCH_MODE_TYPE: "copy_type_signature_tooltip",
+        }.get(self.kind, "copy_signature_tooltip")
         self.sig_copy_btn = CopyButton(
             lang,
-            tooltip_key=(
-                "copy_variable_signature_tooltip"
-                if self.kind == SEARCH_MODE_VARIABLE
-                else (
-                    "copy_macro_signature_tooltip"
-                    if self.kind == SEARCH_MODE_MACRO
-                    else "copy_signature_tooltip"
-                )
-            ),
+            tooltip_key=signature_tooltip,
         )
         self.sig_copy_btn.clicked.connect(self.copy_signature)
         sig_layout.addWidget(self.signature_label, 1)
@@ -4424,17 +5034,14 @@ class ResultCard(QFrame):
         code_header.setSpacing(6)
         self.impl_label = QLabel()
         self.impl_label.setObjectName("codeLabel")
+        copy_tooltip = {
+            SEARCH_MODE_VARIABLE: "copy_variable_tooltip",
+            SEARCH_MODE_MACRO: "copy_macro_tooltip",
+            SEARCH_MODE_TYPE: "copy_type_tooltip",
+        }.get(self.kind, "copy_tooltip")
         self.copy_btn = CopyButton(
             lang,
-            tooltip_key=(
-                "copy_variable_tooltip"
-                if self.kind == SEARCH_MODE_VARIABLE
-                else (
-                    "copy_macro_tooltip"
-                    if self.kind == SEARCH_MODE_MACRO
-                    else "copy_tooltip"
-                )
-            ),
+            tooltip_key=copy_tooltip,
             icon_color="#94a3b8",
             object_name="copyButtonDark",
         )
@@ -4464,11 +5071,14 @@ class ResultCard(QFrame):
         code_layout.addWidget(code)
         layout.addWidget(code_box)
 
-        name_color = (
-            SCOPE_CODE_COLORS.get(self.scope, DEFAULT_NAME_COLOR)
-            if self.kind == SEARCH_MODE_VARIABLE
-            else DEFAULT_NAME_COLOR
-        )
+        if self.kind == SEARCH_MODE_VARIABLE:
+            name_color = SCOPE_CODE_COLORS.get(
+                self.scope, DEFAULT_NAME_COLOR
+            )
+        elif self.kind == SEARCH_MODE_TYPE:
+            name_color = TYPE_CODE_COLOR
+        else:
+            name_color = DEFAULT_NAME_COLOR
         self.highlighter = CodeHighlighter(
             code.document(),
             result.name,
@@ -4492,6 +5102,9 @@ class ResultCard(QFrame):
         elif self.kind == SEARCH_MODE_MACRO:
             self.impl_label.setText(tr(lang, "macro_definition"))
             self.scope_label.setText(tr(lang, "kind_macro"))
+        elif self.kind == SEARCH_MODE_TYPE:
+            self.impl_label.setText(tr(lang, "type_definition"))
+            self.scope_label.setText(tr(lang, "kind_type"))
         else:
             self.impl_label.setText(tr(lang, "implementation"))
         self.copy_btn.set_language(lang)
@@ -5049,10 +5662,10 @@ class MainWindow(QMainWindow):
         self.path_status.setWordWrap(True)
         panel_layout.addWidget(self.path_status)
 
-        search_label_row = QHBoxLayout()
-        search_label_row.setSpacing(6)
-        self.search_label = QLabel()
-        self.search_label.setObjectName("fieldLabel")
+        mode_row = QHBoxLayout()
+        mode_row.setSpacing(6)
+        self.search_type_label = QLabel()
+        self.search_type_label.setObjectName("fieldLabel")
         self.func_mode_btn = QPushButton()
         self.func_mode_btn.setObjectName("segment")
         self.func_mode_btn.setCheckable(True)
@@ -5074,6 +5687,13 @@ class MainWindow(QMainWindow):
         self.macro_mode_btn.setFixedHeight(26)
         self.macro_mode_btn.setMinimumWidth(64)
         self.macro_mode_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.type_mode_btn = QPushButton()
+        self.type_mode_btn.setObjectName("segment")
+        self.type_mode_btn.setCheckable(True)
+        self.type_mode_btn.setAutoExclusive(True)
+        self.type_mode_btn.setFixedHeight(26)
+        self.type_mode_btn.setMinimumWidth(64)
+        self.type_mode_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.func_mode_btn.setChecked(
             self.search_mode == SEARCH_MODE_FUNCTION
         )
@@ -5083,11 +5703,24 @@ class MainWindow(QMainWindow):
         self.macro_mode_btn.setChecked(
             self.search_mode == SEARCH_MODE_MACRO
         )
+        self.type_mode_btn.setChecked(
+            self.search_mode == SEARCH_MODE_TYPE
+        )
+        mode_row.addWidget(self.search_type_label)
+        mode_row.addSpacing(6)
+        mode_row.addWidget(self.func_mode_btn)
+        mode_row.addWidget(self.var_mode_btn)
+        mode_row.addWidget(self.macro_mode_btn)
+        mode_row.addWidget(self.type_mode_btn)
+        mode_row.addStretch(1)
+        panel_layout.addLayout(mode_row)
+
+        search_label_row = QHBoxLayout()
+        search_label_row.setSpacing(6)
+        self.search_label = QLabel()
+        self.search_label.setObjectName("fieldLabel")
         search_label_row.addWidget(self.search_label)
         search_label_row.addStretch(1)
-        search_label_row.addWidget(self.func_mode_btn)
-        search_label_row.addWidget(self.var_mode_btn)
-        search_label_row.addWidget(self.macro_mode_btn)
         panel_layout.addLayout(search_label_row)
 
         search_row = QHBoxLayout()
@@ -5211,6 +5844,9 @@ class MainWindow(QMainWindow):
         self.macro_mode_btn.clicked.connect(
             lambda: self.set_search_mode(SEARCH_MODE_MACRO)
         )
+        self.type_mode_btn.clicked.connect(
+            lambda: self.set_search_mode(SEARCH_MODE_TYPE)
+        )
         self.search_btn.clicked.connect(self.start_search)
         self.stop_btn.clicked.connect(self.stop_search)
         self.search_edit.returnPressed.connect(self.start_search)
@@ -5288,6 +5924,7 @@ class MainWindow(QMainWindow):
         self.func_mode_btn.setChecked(mode == SEARCH_MODE_FUNCTION)
         self.var_mode_btn.setChecked(mode == SEARCH_MODE_VARIABLE)
         self.macro_mode_btn.setChecked(mode == SEARCH_MODE_MACRO)
+        self.type_mode_btn.setChecked(mode == SEARCH_MODE_TYPE)
         if persist:
             self.settings.setValue("search_mode", mode)
         self._update_search_mode_texts()
@@ -5301,7 +5938,10 @@ class MainWindow(QMainWindow):
         return not self.results_view.results
 
     def _update_search_mode_texts(self):
-        if self.search_mode == SEARCH_MODE_MACRO:
+        if self.search_mode == SEARCH_MODE_TYPE:
+            label_key = "type_name"
+            placeholder_key = "type_placeholder"
+        elif self.search_mode == SEARCH_MODE_MACRO:
             label_key = "macro_name"
             placeholder_key = "macro_placeholder"
         elif self.search_mode == SEARCH_MODE_VARIABLE:
@@ -5310,6 +5950,7 @@ class MainWindow(QMainWindow):
         else:
             label_key = "function_name"
             placeholder_key = "search_placeholder"
+        self.search_type_label.setText(tr(self.lang, "search_type"))
         self.search_label.setText(tr(self.lang, label_key))
         self.search_edit.setPlaceholderText(
             tr(self.lang, placeholder_key)
@@ -5317,9 +5958,11 @@ class MainWindow(QMainWindow):
         self.func_mode_btn.setText(tr(self.lang, "mode_function"))
         self.var_mode_btn.setText(tr(self.lang, "mode_variable"))
         self.macro_mode_btn.setText(tr(self.lang, "mode_macro"))
+        self.type_mode_btn.setText(tr(self.lang, "mode_type"))
         self.func_mode_btn.setToolTip(tr(self.lang, "mode_function_tooltip"))
         self.var_mode_btn.setToolTip(tr(self.lang, "mode_variable_tooltip"))
         self.macro_mode_btn.setToolTip(tr(self.lang, "mode_macro_tooltip"))
+        self.type_mode_btn.setToolTip(tr(self.lang, "mode_type_tooltip"))
         self.case_btn.setText(tr(self.lang, "case_sensitive"))
         self.case_btn.setToolTip(tr(self.lang, "case_sensitive_tooltip"))
         self.case_btn.setAccessibleName(
@@ -5349,6 +5992,7 @@ class MainWindow(QMainWindow):
             ("all", tr(self.lang, "scope_filter_all")),
             ("function", tr(self.lang, "mode_function")),
             ("macro", tr(self.lang, "mode_macro")),
+            ("type_def", tr(self.lang, "type_definition")),
             ("global", tr(self.lang, "scope_global")),
             ("local", tr(self.lang, "scope_local")),
             ("member", tr(self.lang, "scope_member")),
@@ -5493,7 +6137,9 @@ class MainWindow(QMainWindow):
         self.search_edit.setFocus()
 
     def _update_hint(self):
-        if self.search_mode == SEARCH_MODE_MACRO:
+        if self.search_mode == SEARCH_MODE_TYPE:
+            hint_key = "type_hint"
+        elif self.search_mode == SEARCH_MODE_MACRO:
             hint_key = "macro_hint"
         elif self.search_mode == SEARCH_MODE_VARIABLE:
             hint_key = "variable_hint"
@@ -5552,6 +6198,7 @@ class MainWindow(QMainWindow):
             kind_key = {
                 SEARCH_MODE_VARIABLE: "kind_variable",
                 SEARCH_MODE_MACRO: "kind_macro",
+                SEARCH_MODE_TYPE: "kind_type",
             }.get(kind_mode, "kind_function")
             render_kwargs["kind"] = tr(self.lang, kind_key)
         text = tr(self.lang, key, **render_kwargs)
@@ -5581,14 +6228,17 @@ class MainWindow(QMainWindow):
             self.count_label.setText(text)
 
     def _update_empty_label(self):
-        # 搜索完成后的空状态沿用上一次搜索的类型，切换函数/变量/宏只影响
+        # 搜索完成后的空状态沿用上一次搜索的类型，切换搜索类型只影响
         # 下一次搜索，不应立刻改写“未找到…定义”的提示。
         mode = (
             self.current_mode
             if self.has_searched and self.empty_state == "no_results"
             else self.search_mode
         )
-        if mode == SEARCH_MODE_MACRO:
+        if mode == SEARCH_MODE_TYPE:
+            initial_key = "empty_initial_type"
+            no_results_key = "empty_no_results_type"
+        elif mode == SEARCH_MODE_MACRO:
             initial_key = "empty_initial_macro"
             no_results_key = "empty_no_results_macro"
         elif mode == SEARCH_MODE_VARIABLE:
@@ -5652,6 +6302,7 @@ class MainWindow(QMainWindow):
         self.func_mode_btn.setEnabled(not active)
         self.var_mode_btn.setEnabled(not active)
         self.macro_mode_btn.setEnabled(not active)
+        self.type_mode_btn.setEnabled(not active)
         self.case_btn.setEnabled(not active)
 
     # -- 目录配置 -----------------------------------------------------------
@@ -5687,10 +6338,13 @@ class MainWindow(QMainWindow):
 
     def start_search(self):
         macro = self.search_mode == SEARCH_MODE_MACRO
+        type_mode = self.search_mode == SEARCH_MODE_TYPE
         variable = self.search_mode == SEARCH_MODE_VARIABLE
         name = self.search_edit.text().strip()
         if not name:
-            if macro:
+            if type_mode:
+                error_key = "error_empty_type_name"
+            elif macro:
                 error_key = "error_empty_macro_name"
             elif variable:
                 error_key = "error_empty_variable_name"
@@ -5701,11 +6355,13 @@ class MainWindow(QMainWindow):
         case_sensitive = self.case_sensitive
         name_pattern = (
             r"[A-Za-z_$][A-Za-z0-9_$]*"
-            if (variable or macro)
+            if (variable or macro or type_mode)
             else r"~?[A-Za-z_$][A-Za-z0-9_$]*"
         )
         if not re.fullmatch(name_pattern, name):
-            if macro:
+            if type_mode:
+                error_key = "error_invalid_type_name"
+            elif macro:
                 error_key = "error_invalid_macro_name"
             elif variable:
                 error_key = "error_invalid_variable_name"

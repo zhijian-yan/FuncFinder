@@ -1,7 +1,7 @@
 # FuncFinder
 
-**在任意代码目录中快速定位函数、变量、常量与宏的定义。**
-**Find function, variable, constant, and macro definitions in any codebase.**
+**在任意代码目录中快速定位函数、变量、常量、宏与类型的定义。**
+**Find function, variable, constant, macro, and type definitions in any codebase.**
 
 [![CI](https://github.com/zhijian-yan/FuncFinder/actions/workflows/ci.yml/badge.svg)](https://github.com/zhijian-yan/FuncFinder/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/zhijian-yan/FuncFinder?display_name=tag&sort=semver)](https://github.com/zhijian-yan/FuncFinder/releases)
@@ -13,26 +13,30 @@
 ## 简介
 
 FuncFinder 是一个基于 Python + PySide6/Qt 6 的桌面工具。选择一个代码目录，
-在「函数」「变量」或「宏」模式下输入名称，它会搜索定义并把签名、文件位置、
-行号和完整代码展示成卡片，适合在大型项目中快速阅读不熟悉的代码。
+在「函数」「变量」「宏」或「类型」模式下输入名称，它会搜索定义并把签名、
+文件位置、行号和完整代码展示成卡片，适合在大型项目中快速阅读不熟悉的代码。
 
 它不是语言服务器，也不依赖编译器索引；它通过扩展名识别语言，并用启发式规则
-提取函数边界、变量声明和宏定义。因此对常见代码足够快，也允许在混合语言目录中
-直接使用。
+提取函数边界、变量声明、宏定义和类型定义。因此对常见代码足够快，也允许在
+混合语言目录中直接使用。
 
 ## 功能
 
-- **函数、变量与宏**：三种搜索模式共用同一个代码目录和结果视图，可随时切换。
+- **四种搜索类型**：函数、变量、宏和类型定义共用同一个代码目录和结果视图，
+  可随时切换。
 - **变量定义**：支持全局/局部变量、常量、结构体/类字段、Python
   `self.attr` 实例属性，并标注结果的作用域。
 - **宏定义**：支持 C/C++/Objective-C 的 `#define`（对象宏、函数宏和多行宏）、
   C# `#define` 以及 Rust `macro_rules!`，卡片会显示完整宏体。
+- **类型定义**：支持 C/C++/Objective-C 的 `struct`/`class`/`union`/`enum`/
+  `typedef`/`using`，以及 Go、Rust、Java、C#、JavaScript/TypeScript、
+  Kotlin、Scala、Swift、Dart、Python 的类型定义。
 - **变量作用域配色**：全局、局部、成员、类属性、实例属性和类型成员使用
   不同颜色；卡片左侧强调条、作用域徽标与代码中的变量名保持一致。
 - **大小写选项**：「区分大小写」默认开启；关闭后普通名称搜索忽略大小写，
   例如 `max_size` 可以找到 `MAX_SIZE`，结果仍保留源码中的原始拼写。
 - **多语言**：C/C++、Python、Go、Rust、Java、C#、JavaScript/TypeScript、
-  Kotlin、Scala、Swift、Dart、Objective-C（C 函数/变量部分）。
+  Kotlin、Scala、Swift、Dart、Objective-C。
 - **快速搜索**：普通搜索优先使用 `ripgrep`，其次系统 `grep`，最后纯
   Python 扫描；不区分大小写时会直接给 rg/grep 加 `-i`。纯 Python 回退会
   先用名称 token 预筛选，避免在每一行都运行完整的声明候选表达式。
@@ -40,13 +44,14 @@ FuncFinder 是一个基于 Python + PySide6/Qt 6 的桌面工具。选择一个�
   不会只在搜索过程中出现。
 - **后台搜索**：搜索在工作线程执行，界面不卡顿，可随时停止。
 - **完整实现**：不仅显示定义行，还会根据花括号/缩进提取整个函数体；
-  变量模式会包含多行初始值，宏模式会收集反斜杠续行的完整宏体。
+  变量模式会包含多行初始值，宏模式会收集反斜杠续行的完整宏体，类型模式会
+  包含完整的类型体。
 - **语法高亮**：按语言高亮关键字、字符串、注释和数字，并突出显示当前
-  函数、变量或宏名。
+  函数、变量、宏或类型名。
 - **结果排序**：可按默认顺序、名称、文件路径、作用域或语言排序，并用
   ↑/↓ 切换升序或降序。
 - **结果筛选**：支持按名称、路径、语言、签名筛选（空格分隔多个关键词），
-  也可按函数、宏或变量作用域筛选；结果数会显示“当前显示 / 总数”。
+  也可按函数、宏、类型定义或变量作用域筛选；结果数会显示“当前显示 / 总数”。
 - **结果操作**：单条复制、复制全部、显示文件位置和行号；复制全部只复制
   当前筛选后显示的结果。
 - **桌面体验**：浅色/深色主题、中英文切换、窗口/任务栏图标。
@@ -95,6 +100,21 @@ FuncFinder 是一个基于 Python + PySide6/Qt 6 的桌面工具。选择一个�
 
 宏模式只查找宏定义，不展开宏调用点；多行宏按反斜杠续行收集完整主体。
 
+类型模式使用同一套扩展名识别规则，支持：
+
+- C/C++、Objective-C：`struct`、`class`、`union`、`enum`、`typedef`（含
+  多行 typedef 主体）和 `using` 别名。
+- Go：`type` 声明（含 `type ( ... )` 分组）、别名和底层类型。
+- Rust：`struct`、`enum`、`trait`、`union`、`type` 别名，以及单元/元组结构体。
+- Java/C#：`class`、`interface`、`enum`、`record`、`struct`。
+- Python：`class`；TypeScript：`class`、`interface`、`enum`、`type` 别名。
+- Kotlin/Scala/Swift/Dart：`class`、`interface`、`object`、`trait`、
+  `protocol`、`actor`、`mixin`、`typealias` 等。
+
+类型模式只查找类型定义，不展开类型使用点；typedef 别名和结构体标签都可能
+作为结果返回。类型提取同样是启发式的，复杂宏、模板特化或嵌套声明可能需要
+人工确认。
+
 ## 快速开始
 
 要求：Python 3.10+。源码运行支持 Linux/Windows/macOS；打包脚本目前支持
@@ -136,28 +156,29 @@ FUNC_FINDER_BACKEND=python python func_finder.py
 ## 使用
 
 1. 启动程序，点击「选择目录」指定代码目录。
-2. 在搜索框上方选择「函数」「变量」或「宏」。
+2. 在「搜索类型」一行选择「函数」「变量」「宏」或「类型」。
 3. 输入名称，例如函数 `i2c_transfer`、`parse_config`、`main`，
-   变量 `MAX_BUFFER_SIZE`、`config`、`timeout`，或宏 `MIN`、`I2C_TRANSFER`。
+   变量 `MAX_BUFFER_SIZE`、`config`、`timeout`，宏 `MIN`、`I2C_TRANSFER`，
+   或类型 `Config`、`device_info_t`、`Status`。
 4. 搜索框右侧的「区分大小写」默认开启；关闭后会忽略大小写，例如
    `max_size` 可以找到 `MAX_SIZE`。
 5. 点击「搜索」，结果会以卡片形式显示。
 6. 结果上方可输入筛选词（名称、路径、语言或签名，空格分隔多个关键词），
-   选择函数、宏或具体作用域，并通过排序下拉框选择排序依据、用 ↑/↓ 切换方向。
-7. 使用卡片上的复制按钮复制完整实现、变量定义或宏定义，或点击「复制全部」；
-   复制全部只包含当前筛选后显示的结果。
-8. 右上角可以切换主题和语言；搜索模式、主题、大小写和排序等配置会自动
+   选择函数、宏、类型定义或具体作用域，并通过排序下拉框选择排序依据、
+   用 ↑/↓ 切换方向。
+7. 使用卡片上的复制按钮复制完整实现、变量定义、宏定义或类型定义，或点击
+   「复制全部」；复制全部只包含当前筛选后显示的结果。
+8. 右上角可以切换主题和语言；搜索类型、主题、大小写和排序等配置会自动
    保存，筛选条件会在下一次搜索时重置。
 
 名称可以包含字母、数字、下划线、`$`，且不能以数字开头，并按完整名称
 匹配：`config` 不会命中 `config_loader`。「区分大小写」默认开启，关闭后
 匹配时忽略大小写，但结果仍保留源码中的原始拼写。变量模式会搜索文件中的
-声明和定义，宏模式只搜索宏定义；卡片中的路径标签可悬停查看完整路径。搜索框
-下方的「引擎：…」小字会一直显示当前搜索引擎。
+声明和定义，宏模式只搜索宏定义，类型模式只搜索类型定义；卡片中的路径标签
+可悬停查看完整路径。搜索框下方的「引擎：…」小字会一直显示当前搜索引擎。
 
-> 提示：切换「函数」/「变量」/「宏」只影响下一次搜索；已经显示的结果卡片会
-> 保留自己的类型和标签。搜索进行中模式与选项按钮会暂时禁用，点击「停止」后
-> 可切换。
+> 提示：切换搜索类型只影响下一次搜索；已经显示的结果卡片会保留自己的类型
+> 和标签。搜索进行中模式与选项按钮会暂时禁用，点击「停止」后可切换。
 
 ## 命令行
 
@@ -218,8 +239,8 @@ PyInstaller 会把构建机上的系统库一起打包，因此 Linux 包的最�
   构建使用。
 - 目标机器仍需要系统提供显卡驱动相关的 `libGL`/`libEGL`，可执行
   `sudo apt install libgl1 libegl1`；其余 Qt/xcb 库会随包分发。
-- Release 工作流使用 `ubuntu-22.04` 构建，并会在 `ubuntu:22.04` 和
-  `ubuntu:24.04` 容器中实际运行产物做兼容性验证。
+- Release 工作流使用 `ubuntu-22.04` 构建，并会在 `ubuntu:22.04`、
+  `ubuntu:24.04` 和 `ubuntu:26.04` 容器中实际启动 GUI 做兼容性验证。
 - 打包版在 Linux 上默认使用 Qt 的 `generic` 平台主题，并把 GIO 模块目录
   指向包内专用目录，避免 Ubuntu 24.04/26.04 的 gvfs/GTK 模块与随包 GLib
   版本不匹配；如需覆盖可自行设置 `QT_QPA_PLATFORMTHEME` 或
@@ -263,8 +284,10 @@ Linux/Windows 单文件包并创建 GitHub Release。
 
 ## 已知限制
 
-- 函数、变量和宏提取都是启发式的，复杂宏、复杂模板、重载和嵌套定义可能
-  需要人工确认。
+- 函数、变量、宏和类型提取都是启发式的，复杂宏、复杂模板、重载、嵌套定义
+  或特殊 typedef 写法可能需要人工确认。
+- 类型模式只返回类型定义本身，不展开类型使用点；多行 typedef 的别名需要
+  位于 typedef 语句范围内（收尾行或紧邻的下一行）。
 - 不区分大小写模式在 rg/grep 不可用时会回退到 Python，在超大目录下会比
   普通大小写敏感搜索慢。
 - 变量模式不会跟踪类型或跨文件符号；`obj.attr` 这类没有类型信息的属性赋值

@@ -4,6 +4,33 @@ All notable changes to FuncFinder are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and this project follows [Semantic Versioning](https://semver.org/).
 
+## [v0.5.0] - 2026-10-28
+
+### Added
+
+- Type definition search as a fourth search mode:
+  - C/C++/Objective-C `struct`, `class`, `union`, `enum`, `typedef`, and
+    `using` aliases, including multi-line typedef bodies.
+  - Go `type` declarations (including grouped `type (...)` blocks), Rust
+    `struct`/`enum`/`trait`/`union`/`type`, Java/C# class/interface/enum/
+    record/struct, and JavaScript/TypeScript/Kotlin/Scala/Swift/Dart/Python
+    type definitions.
+- Type result cards with a dedicated type badge, accent color, declaration
+  summary, full definition, and copy actions.
+- Type results can be filtered with the new “type definition” scope filter.
+- Type-name highlighting in result code views.
+- Unit tests for C/C++ typedef edge cases, Python classes, Go/Rust/Java/C#/
+  TypeScript/Kotlin/Scala/Swift/Dart types, all search backends, deduplication,
+  and type filtering.
+
+### Changed
+
+- The function/variable/macro mode buttons now live in a dedicated “search
+  type” row with four evenly laid-out options, separated from the name field.
+- Window title, subtitle, desktop metadata, README, hints, empty states, and
+  result filters now include type definitions.
+- Bumped the application version to 0.5.0.
+
 ## [v0.4.1] - 2026-10-28
 
 ### Fixed
@@ -122,6 +149,7 @@ and this project follows [Semantic Versioning](https://semver.org/).
 - Function extraction is heuristic and may need manual review for complex
   macros, templates, overloads, or nested definitions.
 
+[v0.5.0]: https://github.com/zhijian-yan/FuncFinder/releases/tag/v0.5.0
 [v0.4.1]: https://github.com/zhijian-yan/FuncFinder/releases/tag/v0.4.1
 [v0.4.0]: https://github.com/zhijian-yan/FuncFinder/releases/tag/v0.4.0
 [v0.3.0]: https://github.com/zhijian-yan/FuncFinder/releases/tag/v0.3.0
